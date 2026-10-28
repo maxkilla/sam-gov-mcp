@@ -35,6 +35,22 @@ The server fails closed: if `MCP_AUTH_TOKEN` is unset, every `/mcp` request retu
 
 Claude Code: `claude mcp add --transport http sam-gov <url> --header "Authorization: Bearer <token>"`
 
+## Toolset profiles (cut agent context)
+
+All 153 tools load by default. Add `?toolsets=` to the URL to load only what an agent needs:
+
+```
+https://<worker>/mcp?toolsets=core,vetting
+```
+
+Sets: `core` (60: SAM.gov, USAspending, Grants, FAR/eCFR, OFAC), `sled` (13), `vetting` (16),
+`disclosure` (8), `regulatory` (9), `pricing` (15), `health` (17), `safety` (3), `geo` (8),
+`cyber` (3). `api_key_status` and `feedback` are always loaded. Unknown names are ignored with a
+note in the server instructions; if none are valid, all tools load. Calls to tools outside the
+profile return a `tool_not_loaded` error (ignore its "set MCP_SAM_GOV_TOOLSETS" hint here: use
+the URL parameter instead). To set a Worker-wide default, add a `MCP_SAM_GOV_TOOLSETS` variable;
+the URL parameter overrides it.
+
 ## Local test
 
 ```bash

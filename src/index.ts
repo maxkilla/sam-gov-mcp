@@ -19,6 +19,14 @@ import { buildMeta, isMetaBundle } from "../node_modules/@cliwant/mcp-sam-gov/di
 // @ts-ignore
 import { toToolError } from "../node_modules/@cliwant/mcp-sam-gov/dist/errors.js";
 // @ts-ignore
+import {
+  resolveToolsets,
+  filterToolsFor,
+  toolNotLoadedEnvelope,
+  ALL_TOOLSET_NAMES,
+  TOOLSET_HINTS,
+} from "../node_modules/@cliwant/mcp-sam-gov/dist/toolsets.js";
+// @ts-ignore
 import { renderDataMapMarkdown } from "../node_modules/@cliwant/mcp-sam-gov/dist/data-map.js";
 
 // Workers' fetch rejects `redirect: "error"`, which many tools in the package use
@@ -40,6 +48,8 @@ interface Env {
   MCP_AUTH_TOKEN: string;
   /** Optional: unlocks the SAM.gov tools that need a key. */
   SAM_GOV_API_KEY?: string;
+  /** Optional default toolset profile (comma-separated), e.g. "core,vetting". Unset = all tools. */
+  MCP_SAM_GOV_TOOLSETS?: string;
 }
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
@@ -62,18 +72,42 @@ function authorized(req: Request, env: Env): boolean {
   return !!m && timingSafeEqual(m[1].trim(), env.MCP_AUTH_TOKEN);
 }
 
-function buildServer(env: Env): Server {
+function buildServer(env: Env, toolsetParam: string | null): Server {
+  // Profile precedence: ?toolsets= on the URL, then the Worker default, then all tools.
+  const toolsetSpec = toolsetParam ?? env.MCP_SAM_GOV_TOOLSETS;
+  const allNames = TOOLS.map((t: any) => t.name);
+  const ts = resolveToolsets(toolsetSpec, allNames);
+  const loaded: Set<string> = ts.loaded;
+  const isAll = ts.sets.length === 1 && ts.sets[0] === "all";
+
+  const notes: string[] = [];
+  if (!isAll) {
+    notes.push(
+      `Loaded toolsets: ${ts.sets.join(", ")} (${loaded.size}/${TOOLS.length} tools). ` +
+        `Other toolsets: ${ALL_TOOLSET_NAMES.filter((n: string) => !ts.sets.includes(n))
+          .map((n: string) => `${n} (${(TOOLSET_HINTS as Record<string, string>)[n]})`)
+          .join("; ")}.`,
+    );
+  }
+  for (const u of ts.unknown) {
+    notes.push(`Unknown toolset '${u}' ignored; valid: ${ALL_TOOLSET_NAMES.join(", ")}.`);
+  }
+  if (ts.fellBack) notes.push("No valid toolset names given; all tools loaded.");
+
   const sam = new SamGovClient({
     apiKey: env.SAM_GOV_API_KEY?.trim() || undefined,
   });
 
   const server = new Server(
     { name: "mcp-sam-gov", version: "1.17.0" },
-    { capabilities: { tools: {}, resources: {} } },
+    {
+      capabilities: { tools: {}, resources: {} },
+      ...(notes.length ? { instructions: notes.join(" ") } : {}),
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: TOOLS.map((t: any) => ({
+    tools: filterToolsFor(TOOLS, loaded).map((t: any) => ({
       name: t.name,
       description: t.description,
       inputSchema: zodToJsonSchema(t.inputSchema),
@@ -110,6 +144,14 @@ function buildServer(env: Env): Server {
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args } = req.params;
+    if (TOOLS.some((t: any) => t.name === name) && !loaded.has(name)) {
+      return {
+        content: [
+          { type: "text", text: JSON.stringify(toolNotLoadedEnvelope(name, ts.sets), null, 2) },
+        ],
+        isError: true,
+      };
+    }
     try {
       const raw = await runTool(name, (args ?? {}) as Record<string, unknown>, sam);
       const data = isMetaBundle(raw) ? raw.data : raw;
@@ -154,7 +196,7 @@ export default {
     }
 
     // Stateless: a fresh server + transport per request, no session storage.
-    const server = buildServer(env);
+    const server = buildServer(env, url.searchParams.get("toolsets"));
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,
