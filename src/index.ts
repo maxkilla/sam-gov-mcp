@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -32,7 +33,7 @@ import { renderDataMapMarkdown } from "../node_modules/@cliwant/mcp-sam-gov/dist
 // Workers' fetch rejects `redirect: "error"`, which many tools in the package use
 // as an SSRF guard. Keep the same guarantee: request "manual" and throw on any 3xx.
 const nativeFetch = globalThis.fetch.bind(globalThis);
-globalThis.fetch = (async (input: any, init?: any) => {
+async function rawFetch(input: any, init?: any): Promise<Response> {
   if (init?.redirect === "error") {
     const res = await nativeFetch(input, { ...init, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
@@ -41,6 +42,100 @@ globalThis.fetch = (async (input: any, init?: any) => {
     return res;
   }
   return nativeFetch(input, init);
+}
+
+// ── Upstream response cache (Workers KV) ────────────────────────────────
+// Only successful (HTTP 200) text/JSON responses are stored, so outages, 429s and
+// schema errors are never cached and still surface as errors. Keys are SHA-256
+// hashes, so API keys that ride in URLs/bodies are never stored. Per-tool-call
+// stats are carried in AsyncLocalStorage and reported in the result's _meta.cache.
+interface CacheStore {
+  kv: KVNamespace;
+  ctx: ExecutionContext;
+  hits: number;
+  misses: number;
+  oldestAgeSeconds: number;
+}
+interface CachedEntry {
+  body: string;
+  contentType: string;
+  storedAt: number;
+}
+const cacheALS = new AsyncLocalStorage<CacheStore>();
+
+const LIVE_HOSTS = new Set(["api.weather.gov", "bwt.cbp.gov"]); // never cached
+const REFERENCE_HOSTS = /(^|\.)(ecfr\.gov|federalregister\.gov|acquisition\.gov|nist\.gov|usitc\.gov)$/;
+function ttlSeconds(host: string): number {
+  if (LIVE_HOSTS.has(host)) return 0;
+  if (REFERENCE_HOSTS.test(host)) return 3600; // slow-changing reference data
+  return 600; // everything else: 10 minutes
+}
+const CACHEABLE_TYPE = /json|text|xml|csv/i;
+const MAX_CACHED_CHARS = 1_000_000;
+
+async function sha256Hex(s: string): Promise<string> {
+  const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+globalThis.fetch = (async (input: any, init?: any) => {
+  const store = cacheALS.getStore();
+  if (!store) return rawFetch(input, init);
+
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : null;
+  const method = String(init?.method ?? "GET").toUpperCase();
+  const body = init?.body;
+  if (!url || (method !== "GET" && method !== "POST")) return rawFetch(input, init);
+  if (body !== undefined && body !== null && typeof body !== "string") return rawFetch(input, init);
+
+  let host: string;
+  try {
+    host = new URL(url).hostname;
+  } catch {
+    return rawFetch(input, init);
+  }
+  const ttl = ttlSeconds(host);
+  if (ttl === 0) return rawFetch(input, init);
+
+  const key = "v1:" + (await sha256Hex(`${method} ${url} ${body ?? ""}`));
+  try {
+    const hit = await store.kv.get<CachedEntry>(key, "json");
+    if (hit && typeof hit.body === "string") {
+      store.hits++;
+      store.oldestAgeSeconds = Math.max(
+        store.oldestAgeSeconds,
+        Math.round((Date.now() - hit.storedAt) / 1000),
+      );
+      return new Response(hit.body, {
+        status: 200,
+        headers: { "content-type": hit.contentType, "x-mcp-cache": "HIT" },
+      });
+    }
+  } catch {
+    // KV read failed: fall through to a live fetch.
+  }
+
+  const res = await rawFetch(input, init);
+  store.misses++;
+  if (res.status === 200 && CACHEABLE_TYPE.test(res.headers.get("content-type") ?? "")) {
+    try {
+      const text = await res.clone().text();
+      if (text.length <= MAX_CACHED_CHARS) {
+        const entry: CachedEntry = {
+          body: text,
+          contentType: res.headers.get("content-type") ?? "application/json",
+          storedAt: Date.now(),
+        };
+        // Best-effort write (e.g. the free plan's daily KV write cap can reject it).
+        store.ctx.waitUntil(
+          store.kv.put(key, JSON.stringify(entry), { expirationTtl: ttl }).catch(() => {}),
+        );
+      }
+    } catch {
+      // Could not read the body for caching: ignore, the caller still has the response.
+    }
+  }
+  return res;
 }) as typeof fetch;
 
 interface Env {
@@ -50,6 +145,8 @@ interface Env {
   SAM_GOV_API_KEY?: string;
   /** Optional default toolset profile (comma-separated), e.g. "core,vetting". Unset = all tools. */
   MCP_SAM_GOV_TOOLSETS?: string;
+  /** KV namespace for the upstream response cache. Unset = no caching. */
+  CACHE?: KVNamespace;
 }
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
@@ -72,7 +169,11 @@ function authorized(req: Request, env: Env): boolean {
   return !!m && timingSafeEqual(m[1].trim(), env.MCP_AUTH_TOKEN);
 }
 
-function buildServer(env: Env, toolsetParam: string | null): Server {
+function buildServer(
+  env: Env,
+  toolsetParam: string | null,
+  cacheCfg: { kv: KVNamespace; ctx: ExecutionContext } | undefined,
+): Server {
   // Profile precedence: ?toolsets= on the URL, then the Worker default, then all tools.
   const toolsetSpec = toolsetParam ?? env.MCP_SAM_GOV_TOOLSETS;
   const allNames = TOOLS.map((t: any) => t.name);
@@ -152,10 +253,30 @@ function buildServer(env: Env, toolsetParam: string | null): Server {
         isError: true,
       };
     }
+    const store: CacheStore | undefined = cacheCfg
+      ? { ...cacheCfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }
+      : undefined;
+    const exec = async () => {
     try {
       const raw = await runTool(name, (args ?? {}) as Record<string, unknown>, sam);
       const data = isMetaBundle(raw) ? raw.data : raw;
-      const _meta = isMetaBundle(raw) ? buildMeta(raw.meta) : buildMeta({});
+      const baseMeta = isMetaBundle(raw) ? buildMeta(raw.meta) : buildMeta({});
+      const _meta = store
+        ? {
+            ...baseMeta,
+            cache: {
+              hits: store.hits,
+              misses: store.misses,
+              servedFromCache: store.hits > 0,
+              ...(store.hits > 0
+                ? {
+                    oldestCachedAgeSeconds: store.oldestAgeSeconds,
+                    note: "Some upstream data came from a short-lived cache (10-60 min depending on source). Add ?cache=off to the MCP URL for live data.",
+                  }
+                : {}),
+            },
+          }
+        : baseMeta;
       return {
         content: [
           { type: "text", text: JSON.stringify({ ok: true, data, _meta }, null, 2) },
@@ -168,13 +289,15 @@ function buildServer(env: Env, toolsetParam: string | null): Server {
         isError: true,
       };
     }
+    };
+    return store ? cacheALS.run(store, exec) : exec();
   });
 
   return server;
 }
 
 export default {
-  async fetch(req: Request, env: Env): Promise<Response> {
+  async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
 
     if (url.pathname === "/health") {
@@ -196,7 +319,11 @@ export default {
     }
 
     // Stateless: a fresh server + transport per request, no session storage.
-    const server = buildServer(env, url.searchParams.get("toolsets"));
+    const cacheCfg =
+      env.CACHE && url.searchParams.get("cache") !== "off"
+        ? { kv: env.CACHE, ctx }
+        : undefined;
+    const server = buildServer(env, url.searchParams.get("toolsets"), cacheCfg);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
       enableJsonResponse: true,

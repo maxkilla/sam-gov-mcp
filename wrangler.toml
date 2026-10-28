@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 
+# Upstream response cache (see README). Namespace: sam-gov-mcp-cache
+[[kv_namespaces]]
+binding = "CACHE"
+id = "2e6735d50f1a4b2fa2f7de0604d1bbf2"
+
 # Secrets (never put these here):
 #   wrangler secret put MCP_AUTH_TOKEN     # required: bearer token for your agents
 #   wrangler secret put SAM_GOV_API_KEY    # optional: only for the 5 key-gated tools
