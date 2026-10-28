@@ -51,6 +51,25 @@ profile return a `tool_not_loaded` error (ignore its "set MCP_SAM_GOV_TOOLSETS" 
 the URL parameter instead). To set a Worker-wide default, add a `MCP_SAM_GOV_TOOLSETS` variable;
 the URL parameter overrides it.
 
+## Caching
+
+Upstream API responses are cached in Workers KV (binding `CACHE`, namespace `sam-gov-mcp-cache`).
+Workers' Cache API does not work on `workers.dev`, which is why this uses KV.
+
+- Only successful (HTTP 200) text/JSON responses are stored. Outages, 429s and bad responses are never
+  cached, so they still surface as errors.
+- TTL: 10 minutes by default, 1 hour for slow-changing reference data (eCFR, Federal Register, FAR,
+  NIST, USITC). Live-data hosts (`api.weather.gov`, `bwt.cbp.gov`) are never cached.
+- Cache keys are SHA-256 hashes of method + URL + body, so API keys are never stored.
+- Every tool result carries `_meta.cache` (`hits`, `misses`, `servedFromCache`, and the age of the
+  oldest cached item when served from cache), so an agent can tell stale from fresh.
+- Add `?cache=off` to the MCP URL to bypass the cache (combine with toolsets: `?toolsets=core&cache=off`).
+- Remove the `[[kv_namespaces]]` block to disable caching entirely.
+- Workers Free plan: KV allows 1,000 writes/day (100,000 reads/day). When the write cap is hit, writes
+  fail quietly and calls simply go live. Workers Paid has no such cap.
+- The package also keeps a small in-memory cache inside a warm instance; KV covers cold starts and
+  other regions.
+
 ## Local test
 
 ```bash
