@@ -80,7 +80,14 @@ A browser dashboard served by the same Worker: `https://<worker>/app`.
   spending by fiscal year, and contracts ending soon (likely recompetes). Select a winner to vet it.
 - **Market**: the same analysis for any agency and NAICS.
 - **Vet a company**: SAM.gov exclusions, OFAC sanctions, recent federal awards.
+- **Pipeline**: track bids (watching, bidding, submitted, won, lost, passed) with notes.
+- **Saved searches**: refreshed daily by a cron trigger; notices that appear since the last look are flagged "New".
 - **All tools**: a form for every one of the 153 tools.
+
+Storage is a D1 database (binding `DB`, schema in `migrations/0001_init.sql`): saved searches, pipeline and
+company-check history. Without the binding, those tabs show a "storage is not set up" message and the rest works.
+To create it elsewhere: `npx wrangler d1 create sam-gov-mcp-db`, put the id in `wrangler.toml`, then
+`npx wrangler d1 execute sam-gov-mcp-db --remote --file migrations/0001_init.sql`.
 
 The page itself holds no data or secrets. It asks for `MCP_AUTH_TOKEN` and sends it as a bearer token to
 `/api/tool` and `/api/tools` (same auth, same cache as `/mcp`). The token is kept in this browser's local
