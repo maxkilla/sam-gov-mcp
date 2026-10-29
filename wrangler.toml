@@ -3,6 +3,11 @@ main = "src/index.ts"
 compatibility_date = "2026-10-01"
 compatibility_flags = ["nodejs_compat", "nodejs_compat_populate_process_env"]
 
+# Keep variables set in the Cloudflare dashboard. Without this, every `wrangler deploy`
+# deletes dashboard-defined plain-text variables that are not in this file.
+# (Secrets are never deleted, so prefer storing keys and tokens as Secrets.)
+keep_vars = true
+
 # Upstream response cache (see README). Namespace: sam-gov-mcp-cache
 [[kv_namespaces]]
 binding = "CACHE"
