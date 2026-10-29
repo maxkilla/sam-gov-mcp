@@ -1,0 +1,613 @@
+<!doctype html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Bid desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#edf0f3; --surface:#fff; --ink:#12202e; --muted:#5b6b7b; --line:#d5dbe2; --soft:#f5f7f9;
+  --accent:#1f6f8b; --accent-ink:#fff; --accent-soft:#d9eaf0; --bar:#1f6f8b; --bar-hot:#0b3d52;
+  --warn:#8a5a00; --warn-bg:#fff1d6; --crit:#a32020; --crit-bg:#fde4e4; --ok:#1d6b3a; --ok-bg:#dff3e6;
+  --shadow:0 1px 2px rgba(18,32,46,.08);
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0e1620; --surface:#16222f; --ink:#e6ecf2; --muted:#93a3b3; --line:#2a3a4a; --soft:#1b2a39;
+  --accent:#5bb3ce; --accent-ink:#06222c; --accent-soft:#1d3a47; --bar:#5bb3ce; --bar-hot:#a9dcec;
+  --warn:#f0c36a; --warn-bg:#3a2d10; --crit:#ff9b9b; --crit-bg:#3d1b1b; --ok:#7fd6a0; --ok-bg:#16301f; --shadow:none;
+}}
+:root[data-theme="dark"]{
+  --bg:#0e1620; --surface:#16222f; --ink:#e6ecf2; --muted:#93a3b3; --line:#2a3a4a; --soft:#1b2a39;
+  --accent:#5bb3ce; --accent-ink:#06222c; --accent-soft:#1d3a47; --bar:#5bb3ce; --bar-hot:#a9dcec;
+  --warn:#f0c36a; --warn-bg:#3a2d10; --crit:#ff9b9b; --crit-bg:#3d1b1b; --ok:#7fd6a0; --ok-bg:#16301f; --shadow:none;
+}
+*{box-sizing:border-box}
+html{color-scheme:light dark}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+button,input,select,textarea{font:inherit;color:inherit}
+a{color:var(--accent)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.wrap{max-width:1180px;margin:0 auto;padding:0 16px}
+header.top{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header.top .wrap{display:flex;align-items:center;gap:20px;min-height:54px;flex-wrap:wrap}
+.brand{font-weight:700;font-size:17px;letter-spacing:-.01em}
+nav{display:flex;gap:2px;flex:1;flex-wrap:wrap}
+nav button{background:none;border:0;padding:15px 12px 13px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent}
+nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.linkbtn{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px;text-decoration:underline}
+main{padding:20px 0 64px}
+h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
+h2{font-size:16px;margin:0 0 10px}
+h3{font-size:14px;margin:0 0 6px}
+.lede{color:var(--muted);margin:0 0 16px;max-width:70ch}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:var(--shadow)}
+.grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+@media (max-width:820px){.grid2{grid-template-columns:1fr}}
+.stack>*+*{margin-top:16px}
+form.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;align-items:end}
+form.filters .wide{grid-column:span 2}
+@media (max-width:520px){form.filters .wide{grid-column:auto}}
+label{display:block;font-size:13px;color:var(--muted);font-weight:500}
+input,select,textarea{width:100%;margin-top:3px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;min-height:110px}
+.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:9px 16px;font-weight:600;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn:disabled{opacity:.55;cursor:wait}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600;background:var(--soft);border:1px solid var(--line)}
+.pill.warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
+.pill.crit{background:var(--crit-bg);color:var(--crit);border-color:transparent}
+.pill.ok{background:var(--ok-bg);color:var(--ok);border-color:transparent}
+.state{padding:14px;border:1px dashed var(--line);border-radius:6px;color:var(--muted);background:var(--soft)}
+.state.err{border-style:solid;border-color:var(--crit);color:var(--crit);background:var(--crit-bg)}
+.spin{display:inline-block;width:12px;height:12px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;vertical-align:-2px;margin-right:6px}
+@keyframes sp{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.spin{animation:none}}
+table{width:100%;border-collapse:collapse;font-size:14px}
+th{text-align:left;font-weight:600;font-size:12.5px;color:var(--muted);border-bottom:1px solid var(--line);padding:6px 8px;white-space:nowrap}
+td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
+td.num,th.num{text-align:right}
+td:last-child{white-space:nowrap}
+tbody tr.click{cursor:pointer}
+tbody tr.click:hover{background:var(--soft)}
+.tablewrap{overflow-x:auto}
+/* charts */
+.bars{display:grid;gap:7px}
+.bar{display:grid;grid-template-columns:minmax(90px,34%) 1fr auto;gap:10px;align-items:center;font-size:13.5px;background:none;border:0;text-align:left;padding:0;width:100%}
+.bar.btnlike{cursor:pointer}
+.bar.btnlike:hover .lbl{text-decoration:underline}
+.bar .lbl{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bar .track{height:14px;background:var(--soft);border-radius:0 4px 4px 0;position:relative}
+.bar .fill{position:absolute;inset:0 auto 0 0;background:var(--bar);border-radius:0 4px 4px 0;min-width:2px}
+.bar .val{font-weight:600;min-width:3ch;text-align:right}
+svg.chart{width:100%;height:auto;display:block;overflow:visible}
+svg.chart text{fill:var(--muted);font-size:11px;font-family:inherit}
+svg.chart .grid{stroke:var(--line);stroke-width:1}
+.tip{position:fixed;pointer-events:none;background:var(--ink);color:var(--bg);padding:5px 9px;border-radius:5px;font-size:12.5px;z-index:30;max-width:260px;display:none}
+details.tbl{margin-top:8px;font-size:13px}
+details.tbl summary{cursor:pointer;color:var(--muted)}
+.kpis{display:flex;gap:28px;flex-wrap:wrap;margin:0 0 4px}
+.kpi b{display:block;font-size:22px;letter-spacing:-.01em}
+.kpi span{font-size:12.5px;color:var(--muted)}
+/* drawer */
+.scrim{position:fixed;inset:0;background:rgba(10,20,30,.45);z-index:10;display:none}
+.drawer{position:fixed;top:0;right:0;bottom:0;width:min(760px,100%);background:var(--bg);z-index:11;overflow-y:auto;padding:18px 16px 64px;transform:translateX(100%);transition:transform .18s ease;box-shadow:-8px 0 24px rgba(0,0,0,.2)}
+body.open .scrim{display:block}
+body.open .drawer{transform:none}
+@media (prefers-reduced-motion:reduce){.drawer{transition:none}}
+.desc{white-space:pre-wrap;max-height:11em;overflow:hidden;position:relative}
+.desc.full{max-height:none}
+dl.facts{display:grid;grid-template-columns:max-content 1fr;gap:4px 14px;margin:0;font-size:14px}
+dl.facts dt{color:var(--muted)}
+dl.facts dd{margin:0}
+.login{max-width:440px;margin:12vh auto;}
+.toolgrid{display:grid;grid-template-columns:260px 1fr;gap:16px}
+@media (max-width:820px){.toolgrid{grid-template-columns:1fr}}
+.toollist{max-height:520px;overflow:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+.toollist button{display:block;width:100%;text-align:left;background:none;border:0;border-bottom:1px solid var(--line);padding:7px 10px;cursor:pointer;font-size:13px}
+.toollist button[aria-current="true"]{background:var(--accent-soft)}
+pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:480px;font-size:12.5px}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="tip" id="tip" role="presentation"></div>
+
+<section id="login" class="login hidden">
+  <div class="panel">
+    <h1>Bid desk</h1>
+    <p class="lede">Enter the access token for this Worker. It stays in this browser and is sent only to this site.</p>
+    <form id="loginForm">
+      <label>Access token<input id="tokenIn" type="password" autocomplete="current-password" required></label>
+      <p class="small muted" id="loginErr" role="alert"></p>
+      <div class="row"><button class="btn" type="submit">Open dashboard</button>
+      <label class="row small" style="margin:0"><input id="remember" type="checkbox" style="width:auto;margin:0" checked> Remember on this device</label></div>
+    </form>
+  </div>
+</section>
+
+<div id="appRoot" class="hidden">
+<header class="top"><div class="wrap">
+  <span class="brand">Bid desk</span>
+  <nav role="tablist" aria-label="Sections">
+    <button role="tab" data-tab="bids" aria-selected="true">Bids</button>
+    <button role="tab" data-tab="market" aria-selected="false">Market</button>
+    <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
+    <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
+  </nav>
+  <button class="linkbtn" id="signout">Sign out</button>
+</div></header>
+
+<main class="wrap">
+  <!-- BIDS -->
+  <section id="tab-bids">
+    <h1>Open bids</h1>
+    <p class="lede">Search live SAM.gov notices, see when responses are due and who is buying, then open any notice for spending history, likely competitors and expiring contracts.</p>
+    <div class="panel">
+      <form class="filters" id="bidForm">
+        <label class="wide">Keyword<input name="query" placeholder="cybersecurity, janitorial, roofing"></label>
+        <label>NAICS<input name="ncode" inputmode="numeric" placeholder="541512" pattern="[0-9]{2,6}"></label>
+        <label>Agency<input name="organizationName" placeholder="Department of Veterans Affairs"></label>
+        <label>Place of performance<input name="state" maxlength="2" placeholder="MD" style="text-transform:uppercase"></label>
+        <label>Set-aside
+          <select name="setAside">
+            <option value="">Any</option><option value="SBA">Small business</option><option value="8A">8(a)</option>
+            <option value="HZS">HUBZone</option><option value="SDVOSBC">Service-disabled veteran</option>
+            <option value="WOSB">Women-owned</option><option value="EDWOSB">Economically disadvantaged WOSB</option>
+            <option value="VSA">Veteran set-aside</option><option value="VSS">Veteran sole source</option>
+          </select></label>
+        <div><button class="btn" type="submit" id="bidGo">Search bids</button></div>
+      </form>
+    </div>
+    <div id="bidOut" class="stack" style="margin-top:16px"></div>
+  </section>
+
+  <!-- MARKET -->
+  <section id="tab-market" class="hidden">
+    <h1>Market research</h1>
+    <p class="lede">Pick an agency and NAICS code to see who wins the work, how spending has moved and which contracts end soon.</p>
+    <div class="panel">
+      <form class="filters" id="mktForm">
+        <label class="wide">Agency<input name="agency" placeholder="Department of Veterans Affairs" required></label>
+        <label>NAICS<input name="naics" inputmode="numeric" placeholder="541512" pattern="[0-9]{2,6}" required></label>
+        <div><button class="btn" type="submit">Analyze</button></div>
+      </form>
+    </div>
+    <div id="mktOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- VET -->
+  <section id="tab-vet" class="hidden">
+    <h1>Vet a company</h1>
+    <p class="lede">Check a company against SAM.gov exclusions and the OFAC sanctions lists, then see what federal work it has won.</p>
+    <div class="panel">
+      <form class="filters" id="vetForm">
+        <label class="wide">Company name<input name="name" placeholder="Booz Allen Hamilton" required></label>
+        <label>UEI (optional)<input name="uei" placeholder="12-character UEI"></label>
+        <div><button class="btn" type="submit">Run checks</button></div>
+      </form>
+    </div>
+    <div id="vetOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- TOOLS -->
+  <section id="tab-tools" class="hidden">
+    <h1>All tools</h1>
+    <p class="lede">Every tool on the server, with a form built from its inputs. Use this for anything the other tabs do not cover.</p>
+    <div class="toolgrid">
+      <div><label>Filter tools<input id="toolFilter" placeholder="usas, fac, ofac…"></label>
+        <div class="toollist" id="toolList" style="margin-top:8px"></div></div>
+      <div class="panel" id="toolPane"><div class="state">Choose a tool from the list.</div></div>
+    </div>
+  </section>
+</main>
+</div>
+
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer" aria-label="Details" aria-hidden="true">
+  <div class="row" style="justify-content:space-between;margin-bottom:10px"><span class="muted small" id="drawerCrumb"></span><button class="btn ghost" id="drawerClose">Close</button></div>
+  <div id="drawerBody"></div>
+</aside>
+
+<script>
+(() => {
+"use strict";
+const $ = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => n == null || isNaN(n) ? "n/a" : Math.abs(n) >= 1e9 ? "$" + (n / 1e9).toFixed(2) + "B" : Math.abs(n) >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : Math.abs(n) >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n);
+const title = (s) => String(s || "").toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()).replace(/\bOf\b/g, "of").replace(/\bThe\b/g, "the").replace(/\bAnd\b/g, "and");
+
+/* ---------- auth + api ---------- */
+let TOKEN = "";
+try { TOKEN = localStorage.getItem("bd_token") || sessionStorage.getItem("bd_token") || ""; } catch {}
+class ApiError extends Error { constructor(m, kind) { super(m); this.kind = kind; } }
+async function api(name, args = {}) {
+  const r = await fetch("/api/tool", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ name, args }) });
+  if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+  const j = await r.json().catch(() => null);
+  if (!j) throw new ApiError("The server returned an unreadable response (" + r.status + ").", "bad");
+  if (j.ok === false) throw new ApiError(j.error?.message || "Tool call failed", j.error?.kind || "tool");
+  if (j.error) throw new ApiError(j.error, "http");
+  return j;
+}
+const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== "" && v != null));
+
+function showLogin(msg) {
+  $("#appRoot").classList.add("hidden"); $("#login").classList.remove("hidden");
+  $("#loginErr").textContent = msg || "";
+}
+function showApp() { $("#login").classList.add("hidden"); $("#appRoot").classList.remove("hidden"); }
+$("#loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const t = $("#tokenIn").value.trim(); if (!t) return;
+  const r = await fetch("/api/tools", { headers: { authorization: "Bearer " + t } });
+  if (!r.ok) { $("#loginErr").textContent = "That token was not accepted."; return; }
+  TOKEN = t;
+  try { ($("#remember").checked ? localStorage : sessionStorage).setItem("bd_token", t); } catch {}
+  $("#tokenIn").value = ""; showApp();
+});
+$("#signout").addEventListener("click", () => {
+  TOKEN = ""; try { localStorage.removeItem("bd_token"); sessionStorage.removeItem("bd_token"); } catch {}
+  showLogin("");
+});
+
+/* ---------- ui helpers ---------- */
+const loading = (msg) => `<div class="state"><span class="spin"></span>${esc(msg)}</div>`;
+const errBox = (e) => `<div class="state err" role="alert"><b>Could not load this.</b> ${esc(e.message || e)}${e.kind === "rate_limited" || /429|rate/i.test(e.message || "") ? " The upstream API is rate limiting; wait a minute and retry." : ""}</div>`;
+const tip = $("#tip");
+function showTip(ev, html) { tip.innerHTML = html; tip.style.display = "block"; const x = Math.min(ev.clientX + 12, innerWidth - 270); tip.style.left = x + "px"; tip.style.top = (ev.clientY + 14) + "px"; }
+function hideTip() { tip.style.display = "none"; }
+function section(titleHtml, bodyId) { return `<div class="panel"><h2>${titleHtml}</h2><div id="${bodyId}">${loading("Loading…")}</div></div>`; }
+let uid = 0; const nid = (p) => p + (++uid);
+
+/* horizontal bar chart (HTML), items: [{label,value,display?,onClick?,tipHtml?}] */
+function barChart(host, items, { click } = {}) {
+  if (!items.length) { host.innerHTML = '<div class="state">Nothing to chart for these filters.</div>'; return; }
+  const max = Math.max(...items.map((i) => i.value)) || 1;
+  host.innerHTML = '<div class="bars">' + items.map((it, i) => `
+    <${click ? "button" : "div"} class="bar ${click ? "btnlike" : ""}" data-i="${i}">
+      <span class="lbl" title="${esc(it.label)}">${esc(it.label)}</span>
+      <span class="track"><span class="fill" style="width:${Math.max(1.5, (it.value / max) * 100)}%"></span></span>
+      <span class="val">${esc(it.display ?? it.value)}</span>
+    </${click ? "button" : "div"}>`).join("") + "</div>" +
+    `<details class="tbl"><summary>View as table</summary><div class="tablewrap"><table><tbody>${items.map((it) => `<tr><td>${esc(it.label)}</td><td class="num">${esc(it.display ?? it.value)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  $$(".bar", host).forEach((b) => {
+    const it = items[+b.dataset.i];
+    if (click) b.addEventListener("click", () => click(it));
+    b.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(it.label)}</b><br>${esc(it.display ?? it.value)}`));
+    b.addEventListener("mouseleave", hideTip);
+  });
+}
+
+/* column chart (SVG), pts: [{x,label,value,hot?}] ; axis labels sparse */
+function columnChart(host, pts, { unit = "", labelEvery = 1 } = {}) {
+  if (!pts.length) { host.innerHTML = '<div class="state">Nothing to chart for these filters.</div>'; return; }
+  const W = 640, H = 190, L = 30, B = 24, T = 8, R = 4;
+  const max = Math.max(...pts.map((p) => p.value)) || 1;
+  const top = Math.ceil(max / Math.pow(10, Math.floor(Math.log10(max)))) * Math.pow(10, Math.floor(Math.log10(max)));
+  const bw = (W - L - R) / pts.length, gap = Math.min(2, bw * .2);
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(unit)} chart">`;
+  [0, .5, 1].forEach((f) => { const v = top * f; svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 5}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)}</text>`; });
+  pts.forEach((p, i) => {
+    const x = L + i * bw + gap / 2, h = (H - T - B) * (p.value / top);
+    if (p.value > 0) svg += `<rect data-i="${i}" x="${x}" y="${y(p.value)}" width="${Math.max(1, bw - gap)}" height="${h}" rx="2" fill="${p.hot ? "var(--bar-hot)" : "var(--bar)"}"/>`;
+    svg += `<rect data-i="${i}" x="${L + i * bw}" y="${T}" width="${bw}" height="${H - T - B}" fill="transparent"/>`;
+    if (i % labelEvery === 0) svg += `<text x="${x + (bw - gap) / 2}" y="${H - 7}" text-anchor="middle">${esc(p.label)}</text>`;
+  });
+  svg += "</svg>";
+  host.innerHTML = svg + `<details class="tbl"><summary>View as table</summary><div class="tablewrap"><table><tbody>${pts.filter((p) => p.value).map((p) => `<tr><td>${esc(p.long || p.label)}</td><td class="num">${p.value}</td></tr>`).join("")}</tbody></table></div></details>`;
+  $$("rect[data-i]", host).forEach((r) => {
+    const p = pts[+r.dataset.i];
+    r.addEventListener("mousemove", (e) => showTip(e, `<b>${esc(p.long || p.label)}</b><br>${p.value} ${esc(unit)}`));
+    r.addEventListener("mouseleave", hideTip);
+  });
+}
+
+/* line chart (SVG) with crosshair, pts: [{label,value}] */
+function lineChart(host, pts) {
+  if (pts.length < 2) { host.innerHTML = '<div class="state">Not enough history to draw a trend.</div>'; return; }
+  const W = 900, H = 220, L = 52, B = 24, T = 10, R = 8;
+  const max = Math.max(...pts.map((p) => p.value)) || 1;
+  const x = (i) => L + (W - L - R) * (i / (pts.length - 1)), y = (v) => T + (H - T - B) * (1 - v / max);
+  const d = pts.map((p, i) => (i ? "L" : "M") + x(i).toFixed(1) + " " + y(p.value).toFixed(1)).join(" ");
+  let svg = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="Spending over time">`;
+  [0, .5, 1].forEach((f) => { svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(max * f)}" y2="${y(max * f)}"/><text x="${L - 6}" y="${y(max * f) + 4}" text-anchor="end">${money(max * f)}</text>`; });
+  const step = Math.ceil(pts.length / 8);
+  pts.forEach((p, i) => { if (i % step === 0 || i === pts.length - 1) svg += `<text x="${x(i)}" y="${H - 7}" text-anchor="middle">${esc(p.label)}</text>`; });
+  svg += `<path d="${d}" fill="none" stroke="var(--bar)" stroke-width="2" stroke-linejoin="round"/>`;
+  svg += `<line id="xh" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-dasharray="3 3" style="display:none"/><circle id="dot" r="4" fill="var(--bar)" stroke="var(--surface)" stroke-width="2" style="display:none"/>`;
+  svg += `<rect id="hit" x="${L}" y="${T}" width="${W - L - R}" height="${H - T - B}" fill="transparent"/></svg>`;
+  host.innerHTML = svg + `<details class="tbl"><summary>View as table</summary><div class="tablewrap"><table><tbody>${pts.map((p) => `<tr><td>${esc(p.label)}</td><td class="num">${money(p.value)}</td></tr>`).join("")}</tbody></table></div></details>`;
+  const svgEl = $("svg", host), hit = $("#hit", host), xh = $("#xh", host), dot = $("#dot", host);
+  hit.addEventListener("mousemove", (e) => {
+    const r = svgEl.getBoundingClientRect(), px = (e.clientX - r.left) * (W / r.width);
+    const i = Math.max(0, Math.min(pts.length - 1, Math.round(((px - L) / (W - L - R)) * (pts.length - 1))));
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.style.display = ""; dot.setAttribute("cx", x(i)); dot.setAttribute("cy", y(pts[i].value)); dot.style.display = "";
+    showTip(e, `<b>${esc(pts[i].label)}</b><br>${money(pts[i].value)}`);
+  });
+  hit.addEventListener("mouseleave", () => { hideTip(); xh.style.display = "none"; dot.style.display = "none"; });
+}
+
+function table(cols, rows, { onRow } = {}) {
+  if (!rows.length) return '<div class="state">No rows returned.</div>';
+  return `<div class="tablewrap"><table><thead><tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr class="${onRow ? "click" : ""}" data-i="${i}">${cols.map((c) => `<td class="${c.num ? "num" : ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+}
+
+/* ---------- date helpers ---------- */
+const DAY = 864e5;
+const daysUntil = (iso) => iso ? Math.ceil((new Date(iso).getTime() - Date.now()) / DAY) : null;
+const dueLabel = (iso) => { const d = daysUntil(iso); if (d == null) return '<span class="muted">none</span>'; if (d < 0) return '<span class="pill">closed</span>'; const cls = d <= 7 ? "warn" : ""; return `<span class="pill ${cls}">${d <= 7 ? "⚠ " : ""}${d === 0 ? "today" : d + (d === 1 ? " day" : " days")}</span> <span class="muted small">${new Date(iso).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</span>`; };
+const curFY = () => { const n = new Date(); return n.getMonth() >= 9 ? n.getFullYear() + 1 : n.getFullYear(); };
+const lastFullFY = () => curFY() - 1;
+
+/* ---------- drawer ---------- */
+function openDrawer(crumb, html) { $("#drawerCrumb").textContent = crumb; $("#drawerBody").innerHTML = html; document.body.classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer").scrollTop = 0; $("#drawerClose").focus(); }
+function closeDrawer() { document.body.classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); }
+$("#drawerClose").addEventListener("click", closeDrawer); $("#scrim").addEventListener("click", closeDrawer);
+addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+
+/* ---------- tabs ---------- */
+function setTab(t) {
+  $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  ["bids", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  if (t === "tools") loadTools();
+  try { history.replaceState(null, "", "#" + t); } catch {}
+}
+$$("nav button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+
+/* ---------- agency resolution (SAM dept string -> USAspending toptier name) ---------- */
+const agencyCache = new Map();
+async function resolveAgency(samAgency) {
+  const dept = String(samAgency || "").split(".")[0].trim();
+  if (agencyCache.has(dept)) return agencyCache.get(dept);
+  let words = dept.replace(/,?\s*DEPARTMENT OF$/i, "").replace(/^DEPT OF /i, "").replace(/^DEPARTMENT OF( THE)? /i, "").trim();
+  if (/^DEFENSE/i.test(words)) words = "Defense";
+  const p = (async () => {
+    const r = await api("usas_lookup_agency", { searchText: title(words) });
+    const m = (r.data.matches || []).find((x) => x.isToptier) || (r.data.matches || [])[0];
+    return m ? m.name : null;
+  })();
+  agencyCache.set(dept, p); return p;
+}
+
+/* ---------- market intel (shared by notice drawer + Market tab) ---------- */
+function intelShell() {
+  const a = nid("i"), b = nid("i"), c = nid("i"), d = nid("i");
+  return { ids: { a, b, c, d }, html: `
+    <div class="stack">
+      <div class="panel"><h2>Who wins this work</h2><p class="muted small" style="margin-top:-6px">Top recipients by obligated dollars, fiscal ${lastFullFY()}. Select a company to vet it.</p><div id="${a}">${loading("Loading…")}</div></div>
+      <div class="panel"><h2>Spending by fiscal year</h2><p class="muted small" style="margin-top:-6px">Completed years only.</p><div id="${b}">${loading("Loading…")}</div></div>
+      <div class="panel"><h2>Contracts ending soon</h2><p class="muted small" style="margin-top:-6px">Likely recompetes in this NAICS.</p><div id="${c}">${loading("Loading…")}</div></div>
+    </div>` };
+}
+async function runIntel(ids, { agency, naics }) {
+  const FY = lastFullFY();
+  const job = async (id, fn) => { const h = $("#" + id); if (!h) return; try { await fn(h); } catch (e) { if (e.kind !== "auth") h.innerHTML = errBox(e); } };
+  await Promise.all([
+    job(ids.a, async (h) => {
+      const r = await api("usas_search_awards", clean({ agency, naics, fiscalYear: FY }));
+      const rows = r.data.topRecipients || [];
+      barChart(h, rows.map((x) => ({ label: title(x.name), name: x.name, value: x.value, display: money(x.value) })), { click: (it) => openVet(it.name) });
+      h.insertAdjacentHTML("afterbegin", `<div class="kpis"><div class="kpi"><b>${money(r.data.totalValue)}</b><span>top-recipient obligations, FY${FY}</span></div></div>`);
+    }),
+    job(ids.b, async (h) => {
+      const r = await api("usas_spending_over_time", clean({ agency, naics }));
+      lineChart(h, (r.data.timeline || []).filter((t) => +t.timePeriod.fiscal_year <= lastFullFY()).map((t) => ({ label: "FY" + String(t.timePeriod.fiscal_year).slice(2), value: t.total || 0 })));
+    }),
+    job(ids.c, async (h) => {
+      const r = await api("usas_search_expiring_contracts", clean({ agency, naics, monthsUntilExpiry: 18, limit: 40 }));
+      const rows = (r.data.contracts || []).filter((x) => x.daysUntilExpiry >= 0).sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry).slice(0, 15);
+      h.innerHTML = table([
+        { h: "Incumbent", f: (x) => `<a href="#" data-vet="${esc(x.recipient)}">${esc(title(x.recipient))}</a>` },
+        { h: "Value", num: 1, f: (x) => money(x.amount) },
+        { h: "Ends", f: (x) => `${esc(x.endDate)} <span class="muted small">(${x.daysUntilExpiry}d)</span>` },
+        { h: "Buyer", f: (x) => esc(x.awardingSubAgency || x.awardingAgency || "") },
+      ], rows);
+      $$("a[data-vet]", h).forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openVet(a.dataset.vet); }));
+    }),
+  ]);
+}
+
+/* ---------- notice drawer ---------- */
+async function openNotice(n) {
+  openDrawer("Notice", `<h1>${esc(n.title)}</h1><p class="muted">${esc(String(n.agency || "").split(".").slice(0, 2).map(title).join(" › "))}</p><div id="nDetail">${loading("Loading notice detail…")}</div><div id="nIntel" style="margin-top:16px"></div>`);
+  let d;
+  try { d = (await api("sam_get_opportunity", { noticeId: n.noticeId })).data; }
+  catch (e) { $("#nDetail").innerHTML = errBox(e); return; }
+  const pop = d.placeOfPerformance ? [d.placeOfPerformance.city?.name, d.placeOfPerformance.state?.code].filter(Boolean).join(", ") : "";
+  const text = (() => { try { return new DOMParser().parseFromString(String(d.description || ""), "text/html").body.textContent.trim(); } catch { return ""; } })();
+  $("#nDetail").innerHTML = `<div class="panel">
+    <dl class="facts">
+      <dt>Responses due</dt><dd>${dueLabel(d.responseDeadline)}</dd>
+      <dt>Solicitation</dt><dd>${esc(d.solicitationNumber || "n/a")}</dd>
+      <dt>NAICS</dt><dd>${esc(d.naics || "n/a")} <span id="sizeStd" class="muted small"></span></dd>
+      <dt>Set-aside</dt><dd>${esc(d.setAside || "n/a")}</dd>
+      <dt>Place of performance</dt><dd>${esc(pop || "n/a")}</dd>
+      <dt>Contacts</dt><dd>${(d.pointsOfContact || []).map((p) => `${esc(p.fullName || "")} ${p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : ""} ${esc(p.phone || "")}`).join("<br>") || "n/a"}</dd>
+    </dl>
+    ${text ? `<h3 style="margin-top:14px">Description</h3><div class="desc" id="desc">${esc(text)}</div><button class="linkbtn" id="descMore">Show all</button>` : ""}
+    <p style="margin-bottom:0"><a href="${esc(n.uiLink)}" target="_blank" rel="noopener noreferrer">Open on SAM.gov</a></p>
+  </div>`;
+  $("#descMore")?.addEventListener("click", (e) => { $("#desc").classList.toggle("full"); e.target.textContent = $("#desc").classList.contains("full") ? "Show less" : "Show all"; });
+  if (d.naics) api("sba_size_standard", { naics: d.naics }).then((r) => { const s = r.data; if ($("#sizeStd") && s.found) $("#sizeStd").textContent = `${s.description}. Small if ${s.revenueLimitUSD ? "under " + money(s.revenueLimitUSD) + " receipts" : s.employeeCountLimit ? "under " + s.employeeCountLimit + " employees" : "within SBA limit"}`; }).catch(() => {});
+  const shell = intelShell(); $("#nIntel").innerHTML = shell.html;
+  let agency = null; try { agency = await resolveAgency(n.agency); } catch {}
+  if (!d.naics && !agency) { $("#nIntel").innerHTML = '<div class="state">This notice has no NAICS code and the agency could not be matched, so market data is unavailable. Try the Market tab.</div>'; return; }
+  runIntel(shell.ids, { agency, naics: d.naics });
+}
+
+/* ---------- BIDS tab ---------- */
+let bidState = { items: [], total: 0, params: null, enriched: new Map() };
+$("#bidForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (f.state) f.state = f.state.toUpperCase(); if (f.setAside) f.setAside = [f.setAside]; else delete f.setAside; bidState = { items: [], total: 0, params: clean(f), enriched: new Map() }; searchBids(0); });
+async function searchBids(offset) {
+  const out = $("#bidOut"), btn = $("#bidGo"); btn.disabled = true;
+  if (!offset) out.innerHTML = loading("Searching SAM.gov…");
+  try {
+    const r = await api("sam_search_opportunities", { ...bidState.params, limit: 50, offset });
+    bidState.items = bidState.items.concat(r.data.opportunities || []); bidState.total = r.data.totalRecords ?? bidState.items.length;
+    renderBids();
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); } finally { btn.disabled = false; }
+}
+function renderBids() {
+  const items = bidState.items, out = $("#bidOut");
+  if (!items.length) { out.innerHTML = '<div class="state">No open notices match. Remove a filter or widen the keyword.</div>'; return; }
+  const live = items.filter((i) => (daysUntil(i.responseDeadline) ?? 1) >= 0);
+  const soon = live.filter((i) => { const d = daysUntil(i.responseDeadline); return d != null && d <= 7; }).length;
+  out.innerHTML = `
+    <div class="panel"><div class="kpis">
+      <div class="kpi"><b>${bidState.total.toLocaleString()}</b><span>open notices match</span></div>
+      <div class="kpi"><b>${items.length}</b><span>loaded below</span></div>
+      <div class="kpi"><b>${soon}</b><span>due within 7 days</span></div>
+    </div></div>
+    <div class="grid2">
+      <div class="panel"><h2>When responses are due</h2><p class="muted small" style="margin-top:-6px">Notices per day, next 60 days. Dark bars are within a week.</p><div id="cDue"></div></div>
+      <div class="panel"><h2>Who is buying</h2><p class="muted small" style="margin-top:-6px">Notices by department.</p><div id="cAgency"></div></div>
+    </div>
+    <div class="grid2 ${bidState.enriched.size ? "" : "hidden"}" id="enrichCharts">
+      <div class="panel"><h2>By NAICS</h2><div id="cNaics"></div></div>
+      <div class="panel"><h2>By set-aside</h2><div id="cSet"></div></div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
+        <button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></div>
+      <div id="enrichMsg" class="muted small" aria-live="polite"></div>
+      <div id="bidTable"></div>
+      ${items.length < bidState.total ? `<p><button class="btn ghost" id="moreBtn">Load 50 more</button></p>` : ""}
+    </div>`;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const pts = Array.from({ length: 60 }, (_, i) => { const dt = new Date(today.getTime() + i * DAY); return { label: i % 10 === 0 ? dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "", long: dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }), value: 0, hot: i <= 7 }; });
+  live.forEach((i) => { const d = new Date(i.responseDeadline); d.setHours(0, 0, 0, 0); const k = Math.round((d - today) / DAY); if (k >= 0 && k < 60) pts[k].value++; });
+  columnChart($("#cDue"), pts, { unit: "notices due" });
+  const by = {}; items.forEach((i) => { const k = title(String(i.agency || "Unknown").split(".")[0]); by[k] = (by[k] || 0) + 1; });
+  const ranked = Object.entries(by).sort((a, b) => b[1] - a[1]); const topA = ranked.slice(0, 8), rest = ranked.slice(8).reduce((s, x) => s + x[1], 0);
+  if (rest) topA.push(["Other", rest]);
+  barChart($("#cAgency"), topA.map(([label, value]) => ({ label, value })));
+  $("#bidTable").innerHTML = table([
+    { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
+    { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
+    { h: "NAICS", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).naics || x.naics || "") },
+    { h: "Set-aside", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).setAside || x.setAside || "") },
+    { h: "Due", f: (x) => dueLabel(x.responseDeadline) },
+  ], items, { onRow: 1 });
+  $$("#bidTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(items[+tr.dataset.i])));
+  $("#moreBtn")?.addEventListener("click", (e) => { e.target.disabled = true; searchBids(items.length); });
+  $("#enrichBtn").addEventListener("click", enrich);
+  if (bidState.enriched.size) drawEnriched();
+}
+function drawEnriched() {
+  const cnt = (f) => { const m = {}; bidState.enriched.forEach((v) => { const k = f(v) || "Not specified"; m[k] = (m[k] || 0) + 1; }); return Object.entries(m).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([label, value]) => ({ label, value })); };
+  $("#enrichCharts").classList.remove("hidden");
+  barChart($("#cNaics"), cnt((v) => v.naics));
+  barChart($("#cSet"), cnt((v) => (v.setAside && v.setAside !== "NONE" ? v.setAside : "None (full and open)")));
+}
+async function enrich() {
+  const btn = $("#enrichBtn"), msg = $("#enrichMsg"); btn.disabled = true;
+  const todo = bidState.items.filter((i) => !bidState.enriched.has(i.noticeId)); let done = 0, failed = 0;
+  const worker = async () => { while (todo.length) { const n = todo.shift(); try { const d = (await api("sam_get_opportunity", { noticeId: n.noticeId })).data; bidState.enriched.set(n.noticeId, { naics: d.naics, setAside: d.setAside }); } catch (e) { failed++; if (e.kind === "auth") return; } done++; msg.textContent = `Reading notice details: ${done} of ${done + todo.length}${failed ? ` (${failed} failed)` : ""}`; } };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  renderBids(); $("#enrichMsg").textContent = failed ? `${failed} notices could not be read and are shown as not specified.` : "";
+}
+
+/* ---------- MARKET tab ---------- */
+$("#mktForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const out = $("#mktOut"); out.innerHTML = loading("Matching agency…");
+  try {
+    const r = await api("usas_lookup_agency", { searchText: f.agency });
+    const m = (r.data.matches || []).find((x) => x.isToptier) || (r.data.matches || [])[0];
+    if (!m) { out.innerHTML = '<div class="state err">No agency matched that name. Try a shorter name such as "Veterans" or "Homeland".</div>'; return; }
+    const shell = intelShell(); out.innerHTML = `<p class="muted">Showing <b>${esc(m.name)}</b>, NAICS ${esc(f.naics)}.</p>` + shell.html;
+    runIntel(shell.ids, { agency: m.name, naics: f.naics });
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+});
+
+/* ---------- VET ---------- */
+const vetHtml = () => { const a = nid("v"), b = nid("v"), c = nid("v"); return { ids: { a, b, c }, html: `<div class="stack">
+  <div class="panel"><h2>SAM.gov exclusions</h2><div id="${a}">${loading("Checking…")}</div></div>
+  <div class="panel"><h2>OFAC sanctions</h2><div id="${b}">${loading("Checking…")}</div></div>
+  <div class="panel"><h2>Recent federal awards</h2><div id="${c}">${loading("Loading…")}</div></div></div>` }; };
+async function runVet(ids, name, uei) {
+  const job = async (id, fn) => { const h = $("#" + id); try { await fn(h); } catch (e) { if (e.kind !== "auth") h.innerHTML = errBox(e); } };
+  const verdict = (cls, icon, text) => `<span class="pill ${cls}">${icon} ${text}</span>`;
+  await Promise.all([
+    job(ids.a, async (h) => {
+      const r = await api("sam_check_exclusions", clean({ query: name, uei }));
+      const recs = r.data.records || [];
+      h.innerHTML = r.data.excluded ? verdict("crit", "✕", `${r.data.matchCount} active exclusion record${r.data.matchCount === 1 ? "" : "s"}`) + table([{ h: "Name", f: (x) => esc(x.name || x.entityName || JSON.stringify(x).slice(0, 80)) }, { h: "Type", f: (x) => esc(x.exclusionType || x.classification || "") }, { h: "Agency", f: (x) => esc(x.excludingAgency || x.agency || "") }], recs)
+        : verdict("ok", "✓", "No active exclusions found") + `<p class="muted small">Searched by ${uei ? "name and UEI" : "name"}. A name search can miss a renamed entity; confirm by UEI on SAM.gov before award.</p>`;
+    }),
+    job(ids.b, async (h) => {
+      const r = await api("ofac_screen_entity", { name });
+      const m = r.data.matches || [];
+      h.innerHTML = r.data.result === "no_name_match" ? verdict("ok", "✓", "No name match on the SDN or Consolidated lists") + `<p class="muted small">Lists published ${esc(r.data.snapshot?.publishedDate || "")}.</p>`
+        : verdict("crit", "✕", `${r.data.matchCount} possible match${r.data.matchCount === 1 ? "" : "es"}`) + table([{ h: "Listed name", f: (x) => esc(x.name || x.matchedName || "") }, { h: "Program", f: (x) => esc([].concat(x.programs || x.program || []).join(", ")) }, { h: "Quality", f: (x) => esc(x.matchQuality || x.quality || "") }], m) + '<p class="muted small">Name matches are leads, not findings. Review each against the OFAC entry before acting.</p>';
+    }),
+    job(ids.c, async (h) => {
+      const r = await api("usas_search_awards_by_recipient", { recipientName: name, limit: 15 });
+      const rows = r.data.awards || [];
+      if (!rows.length) { h.innerHTML = '<div class="state">No awards found under that exact name. Try the legal name as it appears on USAspending.</div>'; return; }
+      h.innerHTML = `<div id="vetBars"></div>` + table([{ h: "Award", f: (x) => `${esc(x.description || x.awardId)}<br><span class="muted small">${esc(x.awardId)}</span>` }, { h: "Buyer", f: (x) => esc(x.awardingSubAgency || x.awardingAgency || "") }, { h: "Value", num: 1, f: (x) => money(x.amount) }], rows);
+      const by = {}; rows.forEach((x) => { const k = x.awardingAgency || "Unknown"; by[k] = (by[k] || 0) + (x.amount || 0); });
+      barChart($("#vetBars"), Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, value]) => ({ label, value, display: money(value) })));
+    }),
+  ]);
+}
+$("#vetForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const v = vetHtml(); $("#vetOut").innerHTML = `<h2>${esc(f.name)}</h2>` + v.html; runVet(v.ids, f.name, f.uei.trim()); });
+function openVet(name) { const v = vetHtml(); openDrawer("Company check", `<h1>${esc(title(name))}</h1>` + v.html); runVet(v.ids, name); }
+
+/* ---------- TOOLS ---------- */
+let TOOLS = null, activeTool = null;
+async function loadTools() {
+  if (TOOLS) return;
+  $("#toolList").innerHTML = loading("Loading…");
+  try { const r = await fetch("/api/tools", { headers: { authorization: "Bearer " + TOKEN } }); if (r.status === 401) return showLogin("That token was not accepted."); TOOLS = (await r.json()).tools; drawToolList(); }
+  catch (e) { $("#toolList").innerHTML = errBox(e); }
+}
+function drawToolList() {
+  const q = $("#toolFilter").value.trim().toLowerCase();
+  $("#toolList").innerHTML = TOOLS.filter((t) => !q || t.name.includes(q) || (t.description || "").toLowerCase().includes(q)).map((t) => `<button data-n="${esc(t.name)}" aria-current="${activeTool === t.name}">${esc(t.name)}</button>`).join("") || '<div class="state">No tools match.</div>';
+  $$("#toolList button").forEach((b) => b.addEventListener("click", () => pickTool(b.dataset.n)));
+}
+$("#toolFilter").addEventListener("input", () => TOOLS && drawToolList());
+function pickTool(name) {
+  activeTool = name; drawToolList();
+  const t = TOOLS.find((x) => x.name === name), props = t.inputSchema.properties || {}, req = new Set(t.inputSchema.required || []);
+  const fields = Object.entries(props).map(([k, v]) => {
+    const label = `${esc(k)}${req.has(k) ? " *" : ""}`, hint = v.description ? `<span class="small muted" style="font-weight:400"> ${esc(v.description).slice(0, 160)}</span>` : "";
+    if (v.enum) return `<label>${label}${hint}<select data-k="${esc(k)}" data-t="s"><option value="">(none)</option>${v.enum.map((o) => `<option>${esc(o)}</option>`).join("")}</select></label>`;
+    if (v.type === "boolean") return `<label>${label}${hint}<select data-k="${esc(k)}" data-t="b"><option value="">(default)</option><option>true</option><option>false</option></select></label>`;
+    if (v.type === "number" || v.type === "integer") return `<label>${label}${hint}<input data-k="${esc(k)}" data-t="n" type="number" step="any"></label>`;
+    if (v.type === "string") return `<label>${label}${hint}<input data-k="${esc(k)}" data-t="s"></label>`;
+    return `<label>${label}${hint} <span class="small muted">(JSON)</span><textarea data-k="${esc(k)}" data-t="j" style="min-height:60px"></textarea></label>`;
+  });
+  $("#toolPane").innerHTML = `<h2>${esc(t.name)}</h2><p class="muted small">${esc(t.description || "")}</p><form id="toolForm" class="stack">${fields.join("") || '<p class="muted">This tool takes no inputs.</p>'}<div><button class="btn" type="submit">Run tool</button></div></form><div id="toolOut" style="margin-top:14px"></div>`;
+  $("#toolForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); const args = {};
+    try {
+      $$("[data-k]", e.target).forEach((el) => { const v = el.value.trim(); if (v === "") return; args[el.dataset.k] = el.dataset.t === "n" ? Number(v) : el.dataset.t === "b" ? v === "true" : el.dataset.t === "j" ? JSON.parse(v) : v; });
+    } catch { $("#toolOut").innerHTML = '<div class="state err">One of the JSON fields is not valid JSON.</div>'; return; }
+    $("#toolOut").innerHTML = loading("Running…");
+    try { const r = await api(name, args); $("#toolOut").innerHTML = `<pre class="out">${esc(JSON.stringify(r.data, null, 2))}</pre><details class="tbl"><summary>Response metadata</summary><pre class="out">${esc(JSON.stringify(r._meta, null, 2))}</pre></details>`; }
+    catch (err) { if (err.kind !== "auth") $("#toolOut").innerHTML = errBox(err); }
+  });
+}
+
+/* ---------- boot ---------- */
+(async () => {
+  if (!TOKEN) return showLogin("");
+  const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
+  if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
+  showApp();
+  const h = (location.hash || "").slice(1); if (["bids", "market", "vet", "tools"].includes(h)) setTab(h);
+})();
+})();
+</script>
+</body>
+</html>

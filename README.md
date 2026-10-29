@@ -70,6 +70,22 @@ Workers' Cache API does not work on `workers.dev`, which is why this uses KV.
 - The package also keeps a small in-memory cache inside a warm instance; KV covers cold starts and
   other regions.
 
+## Dashboard (`/app`)
+
+A browser dashboard served by the same Worker: `https://<worker>/app`.
+
+- **Bids**: search SAM.gov notices; charts of when responses are due and which departments are buying.
+  "Add NAICS and set-aside to charts" reads each notice's detail (SAM's list view omits those fields).
+- **Notice panel**: contacts, description, SBA size standard, top winners for the agency and NAICS,
+  spending by fiscal year, and contracts ending soon (likely recompetes). Select a winner to vet it.
+- **Market**: the same analysis for any agency and NAICS.
+- **Vet a company**: SAM.gov exclusions, OFAC sanctions, recent federal awards.
+- **All tools**: a form for every one of the 153 tools.
+
+The page itself holds no data or secrets. It asks for `MCP_AUTH_TOKEN` and sends it as a bearer token to
+`/api/tool` and `/api/tools` (same auth, same cache as `/mcp`). The token is kept in this browser's local
+storage unless you untick "Remember on this device". `/app` sends `noindex` headers.
+
 ## Local test
 
 ```bash
