@@ -13,6 +13,16 @@ keep_vars = true
 binding = "CACHE"
 id = "2e6735d50f1a4b2fa2f7de0604d1bbf2"
 
+# Saved searches, pipeline and vetting history. Schema: migrations/0001_init.sql
+[[d1_databases]]
+binding = "DB"
+database_name = "sam-gov-mcp-db"
+database_id = "07b30147-4398-4c96-9138-3168a48f3092"
+
+# Daily refresh of saved searches (UTC).
+[triggers]
+crons = ["0 14 * * *"]
+
 # Secrets (never put these here):
 #   wrangler secret put MCP_AUTH_TOKEN     # required: bearer token for your agents
 #   wrangler secret put SAM_GOV_API_KEY    # optional: only for the 5 key-gated tools

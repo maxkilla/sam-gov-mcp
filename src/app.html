@@ -137,6 +137,8 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
   <span class="brand">Bid desk</span>
   <nav role="tablist" aria-label="Sections">
     <button role="tab" data-tab="bids" aria-selected="true">Bids</button>
+    <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
+    <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
     <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
@@ -166,6 +168,20 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       </form>
     </div>
     <div id="bidOut" class="stack" style="margin-top:16px"></div>
+  </section>
+
+  <!-- PIPELINE -->
+  <section id="tab-pipeline" class="hidden">
+    <h1>Pipeline</h1>
+    <p class="lede">Bids you are tracking. Add one from any notice panel, then set its status and keep notes here.</p>
+    <div id="pipeOut"></div>
+  </section>
+
+  <!-- SAVED -->
+  <section id="tab-saved" class="hidden">
+    <h1>Saved searches</h1>
+    <p class="lede">Searches you want watched. They refresh every morning, and new notices are flagged here.</p>
+    <div id="savedOut"></div>
   </section>
 
   <!-- MARKET -->
@@ -235,6 +251,13 @@ async function api(name, args = {}) {
   if (!j) throw new ApiError("The server returned an unreadable response (" + r.status + ").", "bad");
   if (j.ok === false) throw new ApiError(j.error?.message || "Tool call failed", j.error?.kind || "tool");
   if (j.error) throw new ApiError(j.error, "http");
+  return j;
+}
+async function store(method, path, body) {
+  const r = await fetch("/api/store/" + path, { method, headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(j.error || "Storage request failed (" + r.status + ")", "store");
   return j;
 }
 const clean = (o) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== "" && v != null));
@@ -357,8 +380,10 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "pipeline", "saved", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
+  if (t === "pipeline") loadPipeline();
+  if (t === "saved") loadSaved();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 $$("nav button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
@@ -434,8 +459,13 @@ async function openNotice(n) {
       <dt>Contacts</dt><dd>${(d.pointsOfContact || []).map((p) => `${esc(p.fullName || "")} ${p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : ""} ${esc(p.phone || "")}`).join("<br>") || "n/a"}</dd>
     </dl>
     ${text ? `<h3 style="margin-top:14px">Description</h3><div class="desc" id="desc">${esc(text)}</div><button class="linkbtn" id="descMore">Show all</button>` : ""}
-    <p style="margin-bottom:0"><a href="${esc(n.uiLink)}" target="_blank" rel="noopener noreferrer">Open on SAM.gov</a></p>
+    <div class="row" style="margin-top:12px"><a href="${esc(n.uiLink)}" target="_blank" rel="noopener noreferrer">Open on SAM.gov</a>
+      <span style="flex:1"></span><span id="pipeMsg" class="small muted" aria-live="polite"></span><button class="btn ghost" id="pipeAdd">Add to pipeline</button></div>
   </div>`;
+  $("#pipeAdd").addEventListener("click", async () => {
+    try { await store("PUT", "pipeline/" + n.noticeId, { title: n.title, agency: n.agency, due: n.responseDeadline, uiLink: n.uiLink, naics: d.naics, status: "watching" }); $("#pipeMsg").textContent = "Added. Manage it on the Pipeline tab."; $("#pipeAdd").disabled = true; }
+    catch (err) { if (err.kind !== "auth") $("#pipeMsg").textContent = "Could not save: " + err.message; }
+  });
   $("#descMore")?.addEventListener("click", (e) => { $("#desc").classList.toggle("full"); e.target.textContent = $("#desc").classList.contains("full") ? "Show less" : "Show all"; });
   if (d.naics) api("sba_size_standard", { naics: d.naics }).then((r) => { const s = r.data; if ($("#sizeStd") && s.found) $("#sizeStd").textContent = `${s.description}. Small if ${s.revenueLimitUSD ? "under " + money(s.revenueLimitUSD) + " receipts" : s.employeeCountLimit ? "under " + s.employeeCountLimit + " employees" : "within SBA limit"}`; }).catch(() => {});
   const shell = intelShell(); $("#nIntel").innerHTML = shell.html;
@@ -445,8 +475,8 @@ async function openNotice(n) {
 }
 
 /* ---------- BIDS tab ---------- */
-let bidState = { items: [], total: 0, params: null, enriched: new Map() };
-$("#bidForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (f.state) f.state = f.state.toUpperCase(); if (f.setAside) f.setAside = [f.setAside]; else delete f.setAside; bidState = { items: [], total: 0, params: clean(f), enriched: new Map() }; searchBids(0); });
+let bidState = { items: [], total: 0, params: null, enriched: new Map(), newIds: new Set() };
+$("#bidForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (f.state) f.state = f.state.toUpperCase(); if (f.setAside) f.setAside = [f.setAside]; else delete f.setAside; bidState = { items: [], total: 0, params: clean(f), enriched: new Map(), newIds: new Set() }; searchBids(0); });
 async function searchBids(offset) {
   const out = $("#bidOut"), btn = $("#bidGo"); btn.disabled = true;
   if (!offset) out.innerHTML = loading("Searching SAM.gov…");
@@ -457,6 +487,7 @@ async function searchBids(offset) {
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); } finally { btn.disabled = false; }
 }
 function renderBids() {
+  if (bidState.newIds.size) bidState.items.sort((a, b) => bidState.newIds.has(b.noticeId) - bidState.newIds.has(a.noticeId));
   const items = bidState.items, out = $("#bidOut");
   if (!items.length) { out.innerHTML = '<div class="state">No open notices match. Remove a filter or widen the keyword.</div>'; return; }
   const live = items.filter((i) => (daysUntil(i.responseDeadline) ?? 1) >= 0);
@@ -477,7 +508,8 @@ function renderBids() {
     </div>
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
-        <button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></div>
+        <span class="row"><button class="btn ghost" id="saveSearchBtn">Save this search</button><button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></span></div>
+      <form id="saveForm" class="row hidden" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Name for this search<input name="name" required maxlength="80" placeholder="VA cybersecurity, Maryland"></label><button class="btn" type="submit" style="align-self:end">Save</button></form>
       <div id="enrichMsg" class="muted small" aria-live="polite"></div>
       <div id="bidTable"></div>
       ${items.length < bidState.total ? `<p><button class="btn ghost" id="moreBtn">Load 50 more</button></p>` : ""}
@@ -491,7 +523,7 @@ function renderBids() {
   if (rest) topA.push(["Other", rest]);
   barChart($("#cAgency"), topA.map(([label, value]) => ({ label, value })));
   $("#bidTable").innerHTML = table([
-    { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
+    { h: "Notice", f: (x) => `${bidState.newIds.has(x.noticeId) ? '<span class="pill ok">New</span> ' : ""}<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
     { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
     { h: "NAICS", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).naics || x.naics || "") },
     { h: "Set-aside", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).setAside || x.setAside || "") },
@@ -500,6 +532,12 @@ function renderBids() {
   $$("#bidTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(items[+tr.dataset.i])));
   $("#moreBtn")?.addEventListener("click", (e) => { e.target.disabled = true; searchBids(items.length); });
   $("#enrichBtn").addEventListener("click", enrich);
+  $("#saveSearchBtn").addEventListener("click", () => { $("#saveForm").classList.toggle("hidden"); $("#saveForm input").focus(); });
+  $("#saveForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); const name = new FormData(e.target).get("name");
+    try { await store("POST", "searches", { name, params: bidState.params }); e.target.classList.add("hidden"); $("#enrichMsg").textContent = `Saved "${name}". It will refresh every morning.`; refreshBadge(); }
+    catch (err) { if (err.kind !== "auth") $("#enrichMsg").textContent = "Could not save: " + err.message; }
+  });
   if (bidState.enriched.size) drawEnriched();
 }
 function drawEnriched() {
@@ -532,20 +570,24 @@ $("#mktForm").addEventListener("submit", async (e) => {
 const vetHtml = () => { const a = nid("v"), b = nid("v"), c = nid("v"); return { ids: { a, b, c }, html: `<div class="stack">
   <div class="panel"><h2>SAM.gov exclusions</h2><div id="${a}">${loading("Checking…")}</div></div>
   <div class="panel"><h2>OFAC sanctions</h2><div id="${b}">${loading("Checking…")}</div></div>
-  <div class="panel"><h2>Recent federal awards</h2><div id="${c}">${loading("Loading…")}</div></div></div>` }; };
+  <div class="panel"><h2>Recent federal awards</h2><div id="${c}">${loading("Loading…")}</div></div>
+  <div class="panel"><h2>Check history</h2><div id="vetHist">${loading("Loading…")}</div></div></div>` }; };
 async function runVet(ids, name, uei) {
+  const res = { exclusions: "error", ofac: "error", detail: {} };
   const job = async (id, fn) => { const h = $("#" + id); try { await fn(h); } catch (e) { if (e.kind !== "auth") h.innerHTML = errBox(e); } };
   const verdict = (cls, icon, text) => `<span class="pill ${cls}">${icon} ${text}</span>`;
   await Promise.all([
     job(ids.a, async (h) => {
       const r = await api("sam_check_exclusions", clean({ query: name, uei }));
       const recs = r.data.records || [];
+      res.exclusions = r.data.excluded ? "hit" : "clear"; res.detail.exclusionMatches = r.data.matchCount || 0;
       h.innerHTML = r.data.excluded ? verdict("crit", "✕", `${r.data.matchCount} active exclusion record${r.data.matchCount === 1 ? "" : "s"}`) + table([{ h: "Name", f: (x) => esc(x.name || x.entityName || JSON.stringify(x).slice(0, 80)) }, { h: "Type", f: (x) => esc(x.exclusionType || x.classification || "") }, { h: "Agency", f: (x) => esc(x.excludingAgency || x.agency || "") }], recs)
         : verdict("ok", "✓", "No active exclusions found") + `<p class="muted small">Searched by ${uei ? "name and UEI" : "name"}. A name search can miss a renamed entity; confirm by UEI on SAM.gov before award.</p>`;
     }),
     job(ids.b, async (h) => {
       const r = await api("ofac_screen_entity", { name });
       const m = r.data.matches || [];
+      res.ofac = r.data.result === "no_name_match" ? "clear" : "hit"; res.detail.ofacMatches = r.data.matchCount || 0; res.detail.ofacListDate = r.data.snapshot?.publishedDate;
       h.innerHTML = r.data.result === "no_name_match" ? verdict("ok", "✓", "No name match on the SDN or Consolidated lists") + `<p class="muted small">Lists published ${esc(r.data.snapshot?.publishedDate || "")}.</p>`
         : verdict("crit", "✕", `${r.data.matchCount} possible match${r.data.matchCount === 1 ? "" : "es"}`) + table([{ h: "Listed name", f: (x) => esc(x.name || x.matchedName || "") }, { h: "Program", f: (x) => esc([].concat(x.programs || x.program || []).join(", ")) }, { h: "Quality", f: (x) => esc(x.matchQuality || x.quality || "") }], m) + '<p class="muted small">Name matches are leads, not findings. Review each against the OFAC entry before acting.</p>';
     }),
@@ -558,9 +600,70 @@ async function runVet(ids, name, uei) {
       barChart($("#vetBars"), Object.entries(by).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([label, value]) => ({ label, value, display: money(value) })));
     }),
   ]);
+  store("POST", "vet", { name, uei: uei || null, ...res }).then(() => showVetHistory(name)).catch(() => {});
+}
+async function showVetHistory(name) {
+  const host = $("#vetHist"); if (!host) return;
+  try {
+    const { checks } = await store("GET", "vet?name=" + encodeURIComponent(name));
+    const pill = (v) => v === "clear" ? '<span class="pill ok">✓ clear</span>' : v === "hit" ? '<span class="pill crit">✕ match</span>' : '<span class="pill warn">⚠ not checked</span>';
+    host.innerHTML = checks.length ? table([{ h: "Checked", f: (x) => esc(new Date(x.checked_at).toLocaleString()) }, { h: "SAM exclusions", f: (x) => pill(x.exclusions) }, { h: "OFAC", f: (x) => pill(x.ofac) }], checks) : '<div class="state">No earlier checks.</div>';
+  } catch (e) { host.innerHTML = e.kind === "auth" ? "" : `<div class="state">History is unavailable: ${esc(e.message)}</div>`; }
 }
 $("#vetForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const v = vetHtml(); $("#vetOut").innerHTML = `<h2>${esc(f.name)}</h2>` + v.html; runVet(v.ids, f.name, f.uei.trim()); });
 function openVet(name) { const v = vetHtml(); openDrawer("Company check", `<h1>${esc(title(name))}</h1>` + v.html); runVet(v.ids, name); }
+
+/* ---------- PIPELINE ---------- */
+const STATUS = [["watching", "Watching"], ["bidding", "Bidding"], ["submitted", "Submitted"], ["won", "Won"], ["lost", "Lost"], ["passed", "Passed"]];
+async function loadPipeline() {
+  const out = $("#pipeOut"); out.innerHTML = loading("Loading…");
+  try {
+    const { items } = await store("GET", "pipeline");
+    if (!items.length) { out.innerHTML = '<div class="state">Nothing tracked yet. Open a notice on the Bids tab and choose Add to pipeline.</div>'; return; }
+    out.innerHTML = `<div class="grid2"><div class="panel"><h2>By status</h2><div id="pipeChart"></div></div><div class="panel"><h2>Due soonest</h2><div id="pipeSoon"></div></div></div><div class="panel" style="margin-top:16px"><div class="tablewrap"><table id="pipeTable"><thead><tr><th>Notice</th><th>Due</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>${items.map((x) => `<tr data-id="${esc(x.notice_id)}"><td><b>${esc(x.title)}</b><br><span class="muted small">${esc(title(String(x.agency || "").split(".")[0]))}${x.naics ? " · NAICS " + esc(x.naics) : ""}</span> ${x.ui_link ? `<a class="small" href="${esc(x.ui_link)}" target="_blank" rel="noopener noreferrer">SAM.gov</a>` : ""}</td><td>${dueLabel(x.due)}</td><td><select class="st" aria-label="Status">${STATUS.map(([v, l]) => `<option value="${v}" ${v === x.status ? "selected" : ""}>${l}</option>`).join("")}</select></td><td style="min-width:220px"><textarea class="nt" aria-label="Notes" style="min-height:54px;margin:0">${esc(x.notes)}</textarea></td><td><button class="linkbtn rm">Remove</button></td></tr>`).join("")}</tbody></table></div></div>`;
+    const counts = {}; items.forEach((x) => counts[x.status] = (counts[x.status] || 0) + 1);
+    barChart($("#pipeChart"), STATUS.filter(([v]) => counts[v]).map(([v, l]) => ({ label: l, value: counts[v] })));
+    const soon = items.filter((x) => x.due && daysUntil(x.due) >= 0 && !["won", "lost", "passed"].includes(x.status)).sort((a, b) => new Date(a.due) - new Date(b.due)).slice(0, 5);
+    $("#pipeSoon").innerHTML = soon.length ? soon.map((x) => `<div class="row" style="justify-content:space-between;margin-bottom:6px"><span>${esc(x.title.slice(0, 48))}</span>${dueLabel(x.due)}</div>`).join("") : '<div class="state">No open deadlines.</div>';
+    $$("#pipeTable tbody tr").forEach((tr) => {
+      const x = items.find((i) => i.notice_id === tr.dataset.id);
+      const save = (extra) => store("PUT", "pipeline/" + x.notice_id, { title: x.title, status: $(".st", tr).value, notes: $(".nt", tr).value, ...extra }).catch((e) => { if (e.kind !== "auth") alert("Could not save: " + e.message); });
+      $(".st", tr).addEventListener("change", () => save().then(loadPipeline));
+      $(".nt", tr).addEventListener("blur", () => { if ($(".nt", tr).value !== x.notes) { x.notes = $(".nt", tr).value; save(); } });
+      $(".rm", tr).addEventListener("click", () => store("DELETE", "pipeline/" + x.notice_id).then(loadPipeline).catch(() => {}));
+    });
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
+
+/* ---------- SAVED SEARCHES ---------- */
+const SET_LABEL = { SBA: "Small business", "8A": "8(a)", HZS: "HUBZone", SDVOSBC: "Service-disabled veteran", WOSB: "Women-owned", EDWOSB: "EDWOSB", VSA: "Veteran set-aside", VSS: "Veteran sole source" };
+const summarize = (p) => [p.query && `“${p.query}”`, p.ncode && "NAICS " + p.ncode, p.organizationName, p.state && "in " + p.state, p.setAside && p.setAside.map((s) => SET_LABEL[s] || s).join(", ")].filter(Boolean).join(" · ") || "All notices";
+async function refreshBadge() {
+  try { const { searches } = await store("GET", "searches"); const n = searches.reduce((s, x) => s + x.newCount, 0); const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); } catch {}
+}
+async function loadSaved() {
+  const out = $("#savedOut"); out.innerHTML = loading("Loading…");
+  try {
+    const { searches } = await store("GET", "searches");
+    if (!searches.length) { out.innerHTML = '<div class="state">No saved searches. Run a search on the Bids tab and choose Save this search.</div>'; return; }
+    out.innerHTML = `<div class="panel"><div class="tablewrap"><table id="savedTable"><thead><tr><th>Search</th><th class="num">Matches</th><th>Last run</th><th></th></tr></thead><tbody>${searches.map((x) => `<tr data-id="${x.id}"><td><b>${esc(x.name)}</b> ${x.newCount ? `<span class="pill ok">${x.newCount} new</span>` : ""}<br><span class="muted small">${esc(summarize(x.params))}</span></td><td class="num">${x.lastTotal ?? ""}</td><td>${x.lastRunAt ? esc(new Date(x.lastRunAt).toLocaleString()) : "never"}</td><td style="white-space:nowrap"><button class="btn ghost op">Open</button> <button class="linkbtn rn">Refresh</button> <button class="linkbtn rm">Delete</button></td></tr>`).join("")}</tbody></table></div></div>`;
+    $$("#savedTable tbody tr").forEach((tr) => {
+      const id = tr.dataset.id, x = searches.find((s) => String(s.id) === id);
+      $(".op", tr).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+          const r = await store("POST", `searches/${id}/run`); if (r.error) throw new ApiError(r.error);
+          const f = $("#bidForm"); ["query", "ncode", "organizationName", "state"].forEach((k) => f.elements[k].value = x.params[k] || ""); f.elements.setAside.value = (x.params.setAside || [])[0] || "";
+          bidState = { items: r.opportunities, total: r.total, params: x.params, enriched: new Map(), newIds: new Set(r.newIds) };
+          setTab("bids"); renderBids();
+          if (r.newIds.length) store("POST", `searches/${id}/seen`).then(refreshBadge).catch(() => {});
+        } catch (err) { if (err.kind !== "auth") { e.target.disabled = false; alert("Could not run: " + err.message); } }
+      });
+      $(".rn", tr).addEventListener("click", (e) => { e.target.textContent = "Refreshing…"; store("POST", `searches/${id}/run`).then(() => { loadSaved(); refreshBadge(); }).catch(() => loadSaved()); });
+      $(".rm", tr).addEventListener("click", () => store("DELETE", "searches/" + id).then(() => { loadSaved(); refreshBadge(); }));
+    });
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
 
 /* ---------- TOOLS ---------- */
 let TOOLS = null, activeTool = null;
@@ -605,7 +708,8 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "market", "vet", "tools"].includes(h)) setTab(h);
+  refreshBadge();
 })();
 })();
 </script>
