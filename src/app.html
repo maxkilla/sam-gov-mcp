@@ -153,8 +153,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       <form class="filters" id="bidForm">
         <label class="wide">Keyword<input name="query" placeholder="cybersecurity, janitorial, roofing"></label>
         <label>NAICS<input name="ncode" inputmode="numeric" placeholder="541512" pattern="[0-9]{2,6}"></label>
-        <label>Agency<input name="organizationName" placeholder="Department of Veterans Affairs"></label>
-        <label>Place of performance<input name="state" maxlength="2" placeholder="MD" style="text-transform:uppercase"></label>
+        <label>Place of performance<select name="state"><option value="">Anywhere</option><option value="AL">Alabama</option><option value="AK">Alaska</option><option value="AZ">Arizona</option><option value="AR">Arkansas</option><option value="CA">California</option><option value="CO">Colorado</option><option value="CT">Connecticut</option><option value="DE">Delaware</option><option value="DC">District of Columbia</option><option value="FL">Florida</option><option value="GA">Georgia</option><option value="HI">Hawaii</option><option value="ID">Idaho</option><option value="IL">Illinois</option><option value="IN">Indiana</option><option value="IA">Iowa</option><option value="KS">Kansas</option><option value="KY">Kentucky</option><option value="LA">Louisiana</option><option value="ME">Maine</option><option value="MD">Maryland</option><option value="MA">Massachusetts</option><option value="MI">Michigan</option><option value="MN">Minnesota</option><option value="MS">Mississippi</option><option value="MO">Missouri</option><option value="MT">Montana</option><option value="NE">Nebraska</option><option value="NV">Nevada</option><option value="NH">New Hampshire</option><option value="NJ">New Jersey</option><option value="NM">New Mexico</option><option value="NY">New York</option><option value="NC">North Carolina</option><option value="ND">North Dakota</option><option value="OH">Ohio</option><option value="OK">Oklahoma</option><option value="OR">Oregon</option><option value="PA">Pennsylvania</option><option value="RI">Rhode Island</option><option value="SC">South Carolina</option><option value="SD">South Dakota</option><option value="TN">Tennessee</option><option value="TX">Texas</option><option value="UT">Utah</option><option value="VT">Vermont</option><option value="VA">Virginia</option><option value="WA">Washington</option><option value="WV">West Virginia</option><option value="WI">Wisconsin</option><option value="WY">Wyoming</option><option value="PR">Puerto Rico</option><option value="GU">Guam</option><option value="VI">U.S. Virgin Islands</option><option value="AS">American Samoa</option><option value="MP">Northern Mariana Islands</option></select></label>
         <label>Set-aside
           <select name="setAside">
             <option value="">Any</option><option value="SBA">Small business</option><option value="8A">8(a)</option>
@@ -174,7 +173,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <p class="lede">Pick an agency and NAICS code to see who wins the work, how spending has moved and which contracts end soon.</p>
     <div class="panel">
       <form class="filters" id="mktForm">
-        <label class="wide">Agency<input name="agency" placeholder="Department of Veterans Affairs" required></label>
+        <label class="wide">Agency<select name="agency" id="mktAgency" required><option value="">Loading agencies…</option></select></label>
         <label>NAICS<input name="naics" inputmode="numeric" placeholder="541512" pattern="[0-9]{2,6}" required></label>
         <div><button class="btn" type="submit">Analyze</button></div>
       </form>
@@ -359,6 +358,7 @@ function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
   ["bids", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
+  if (t === "market") loadAgencies();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 $$("nav button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
@@ -445,8 +445,8 @@ async function openNotice(n) {
 }
 
 /* ---------- BIDS tab ---------- */
-let bidState = { items: [], total: 0, params: null, enriched: new Map() };
-$("#bidForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (f.state) f.state = f.state.toUpperCase(); if (f.setAside) f.setAside = [f.setAside]; else delete f.setAside; bidState = { items: [], total: 0, params: clean(f), enriched: new Map() }; searchBids(0); });
+let bidState = { items: [], total: 0, params: null, enriched: new Map(), agency: "" };
+$("#bidForm").addEventListener("submit", (e) => { e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); if (f.setAside) f.setAside = [f.setAside]; else delete f.setAside; bidState = { items: [], total: 0, params: clean(f), enriched: new Map(), agency: "" }; searchBids(0); });
 async function searchBids(offset) {
   const out = $("#bidOut"), btn = $("#bidGo"); btn.disabled = true;
   if (!offset) out.innerHTML = loading("Searching SAM.gov…");
@@ -478,7 +478,7 @@ function renderBids() {
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
         <button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></div>
-      <div id="enrichMsg" class="muted small" aria-live="polite"></div>
+      <div class="row" style="margin-bottom:8px"><label style="min-width:260px">Agency<select id="agencyFilter"></select></label><span id="enrichMsg" class="muted small" aria-live="polite" style="align-self:end"></span></div>
       <div id="bidTable"></div>
       ${items.length < bidState.total ? `<p><button class="btn ghost" id="moreBtn">Load 50 more</button></p>` : ""}
     </div>`;
@@ -490,14 +490,23 @@ function renderBids() {
   const ranked = Object.entries(by).sort((a, b) => b[1] - a[1]); const topA = ranked.slice(0, 8), rest = ranked.slice(8).reduce((s, x) => s + x[1], 0);
   if (rest) topA.push(["Other", rest]);
   barChart($("#cAgency"), topA.map(([label, value]) => ({ label, value })));
+  const dept = (x) => (x.agency ? title(String(x.agency).split(".")[0]) : "Agency not listed");
+  const depts = {}; items.forEach((i) => { depts[dept(i)] = (depts[dept(i)] || 0) + 1; });
+  const sel = $("#agencyFilter");
+  sel.innerHTML = `<option value="">All agencies (${items.length})</option>` + Object.entries(depts).sort((a, b) => b[1] - a[1]).map(([d, n]) => `<option value="${esc(d)}" ${d === bidState.agency ? "selected" : ""}>${esc(d)} (${n})</option>`).join("");
+  sel.addEventListener("change", () => { bidState.agency = sel.value; drawBidTable(); });
+  drawBidTable();
+  function drawBidTable() {
+  const shown = bidState.agency ? items.filter((i) => dept(i) === bidState.agency) : items;
   $("#bidTable").innerHTML = table([
     { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
     { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
     { h: "NAICS", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).naics || x.naics || "") },
     { h: "Set-aside", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).setAside || x.setAside || "") },
     { h: "Due", f: (x) => dueLabel(x.responseDeadline) },
-  ], items, { onRow: 1 });
-  $$("#bidTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(items[+tr.dataset.i])));
+  ], shown, { onRow: 1 });
+  $$("#bidTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(shown[+tr.dataset.i])));
+  }
   $("#moreBtn")?.addEventListener("click", (e) => { e.target.disabled = true; searchBids(items.length); });
   $("#enrichBtn").addEventListener("click", enrich);
   if (bidState.enriched.size) drawEnriched();
@@ -517,15 +526,21 @@ async function enrich() {
 }
 
 /* ---------- MARKET tab ---------- */
-$("#mktForm").addEventListener("submit", async (e) => {
-  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const out = $("#mktOut"); out.innerHTML = loading("Matching agency…");
+let agenciesLoaded = false;
+async function loadAgencies() {
+  if (agenciesLoaded) return; const sel = $("#mktAgency");
   try {
-    const r = await api("usas_lookup_agency", { searchText: f.agency });
-    const m = (r.data.matches || []).find((x) => x.isToptier) || (r.data.matches || [])[0];
-    if (!m) { out.innerHTML = '<div class="state err">No agency matched that name. Try a shorter name such as "Veterans" or "Homeland".</div>'; return; }
-    const shell = intelShell(); out.innerHTML = `<p class="muted">Showing <b>${esc(m.name)}</b>, NAICS ${esc(f.naics)}.</p>` + shell.html;
-    runIntel(shell.ids, { agency: m.name, naics: f.naics });
-  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+    const r = await api("usas_list_toptier_agencies", {});
+    const list = (r.data.agencies || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+    sel.innerHTML = '<option value="">Choose an agency</option>' + list.map((a) => `<option value="${esc(a.name)}">${esc(a.name)}${a.abbreviation ? " (" + esc(a.abbreviation) + ")" : ""}</option>`).join("");
+    agenciesLoaded = true;
+  } catch (e) { if (e.kind !== "auth") sel.innerHTML = '<option value="">Could not load agencies. Reload to retry.</option>'; }
+}
+$("#mktForm").addEventListener("submit", (e) => {
+  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const out = $("#mktOut");
+  if (!f.agency) { out.innerHTML = '<div class="state err">Choose an agency first.</div>'; return; }
+  const shell = intelShell(); out.innerHTML = `<p class="muted">Showing <b>${esc(f.agency)}</b>, NAICS ${esc(f.naics)}.</p>` + shell.html;
+  runIntel(shell.ids, { agency: f.agency, naics: f.naics });
 });
 
 /* ---------- VET ---------- */
