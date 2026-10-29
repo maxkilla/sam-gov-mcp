@@ -114,6 +114,7 @@ dl.facts dd{margin:0}
 .toollist button[aria-current="true"]{background:var(--accent-soft)}
 pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:480px;font-size:12.5px}
 .hidden{display:none!important}
+.rng{position:relative;height:14px;margin:14px 0 6px}.rngbar{position:absolute;inset:5px 0;border-radius:4px;background:var(--bar,#2a6f8f);opacity:.35}.rngmid{position:absolute;top:0;width:3px;height:14px;margin-left:-1px;border-radius:2px;background:var(--bar,#2a6f8f)}
 </style>
 </head>
 <body>
@@ -140,6 +141,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
     <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
     <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
+    <button role="tab" data-tab="pricing" aria-selected="false">Pricing</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
     <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
@@ -198,6 +200,39 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       </form>
     </div>
     <div id="grantOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- PRICING -->
+  <section id="tab-pricing" class="hidden">
+    <h1>Pricing</h1>
+    <p class="lede">Check what the government has paid for a labor category, and what it allows for travel, before you set a price.</p>
+    <div class="panel">
+      <h2>Labor rates</h2>
+      <form class="filters" id="laborForm">
+        <label class="wide">Labor category<input name="laborCategory" required placeholder="Software Engineer, Program Manager"></label>
+        <label>Business size<select name="businessSize"><option value="">Any</option><option value="S">Small</option><option value="O">Other than small</option></select></label>
+        <label>Education<select name="educationLevel"><option value="">Any</option><option value="HS">High school</option><option value="AA">Associate</option><option value="BA">Bachelor's</option><option value="MA">Master's</option><option value="PHD">Doctorate</option></select></label>
+        <label>Years of experience (at least)<input name="minYearsExperience" type="number" min="0" max="40"></label>
+        <label>SIN<input name="sin" placeholder="54151S"></label>
+        <div><button class="btn" type="submit" id="laborGo">Look up rates</button></div>
+      </form>
+    </div>
+    <div id="laborOut" style="margin-top:16px"></div>
+    <div class="panel" style="margin-top:24px">
+      <h2>Travel per diem</h2>
+      <form class="filters" id="perForm">
+        <label>City<input name="city" placeholder="Washington"></label>
+        <label>State<select name="state" id="perState"></select></label>
+        <label>or ZIP<input name="zip" inputmode="numeric" pattern="[0-9]{5}" placeholder="20001"></label>
+        <div><button class="btn" type="submit" id="perGo">Look up per diem</button></div>
+      </form>
+    </div>
+    <div id="perOut" style="margin-top:16px"></div>
+    <div class="panel hidden" id="tripBox" style="margin-top:12px">
+      <h2>Estimate a trip</h2>
+      <div class="filters"><label>Month<select id="tripMonth"></select></label><label>Nights<input id="tripNights" type="number" min="1" max="60" value="3"></label></div>
+      <p id="tripOut" aria-live="polite"></p>
+    </div>
   </section>
 
   <!-- MARKET -->
@@ -396,7 +431,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "pipeline", "saved", "grants", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "pipeline", "saved", "grants", "pricing", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -473,7 +508,7 @@ async function openNotice(n) {
       <dt>Solicitation</dt><dd>${esc(d.solicitationNumber || "n/a")}</dd>
       <dt>NAICS</dt><dd>${esc(d.naics || "n/a")} <span id="sizeStd" class="muted small"></span></dd>
       <dt>Set-aside</dt><dd>${esc(d.setAside || "n/a")}</dd>
-      <dt>Place of performance</dt><dd>${esc(pop || "n/a")}</dd>
+      <dt>Place of performance</dt><dd>${esc(pop || "n/a")}${d.placeOfPerformance?.state?.code ? ` <a href="#" id="travelLink" class="small">Travel costs</a>` : ""}</dd>
       <dt>Contacts</dt><dd>${(d.pointsOfContact || []).map((p) => `${esc(p.fullName || "")} ${p.email ? `<a href="mailto:${esc(p.email)}">${esc(p.email)}</a>` : ""} ${esc(p.phone || "")}`).join("<br>") || "n/a"}</dd>
     </dl>
     ${text ? `<h3 style="margin-top:14px">Description</h3><div class="desc" id="desc">${esc(text)}</div><button class="linkbtn" id="descMore">Show all</button>` : ""}
@@ -484,6 +519,7 @@ async function openNotice(n) {
     try { await store("PUT", "pipeline/" + n.noticeId, { title: n.title, agency: n.agency, due: n.responseDeadline, uiLink: n.uiLink, naics: d.naics, status: "watching" }); $("#pipeMsg").textContent = "Added. Manage it on the Pipeline tab."; $("#pipeAdd").disabled = true; }
     catch (err) { if (err.kind !== "auth") $("#pipeMsg").textContent = "Could not save: " + err.message; }
   });
+  $("#travelLink")?.addEventListener("click", (e) => { e.preventDefault(); const p = d.placeOfPerformance; closeDrawer(); setTab("pricing"); $("#perForm [name=city]").value = p.city?.name || ""; $("#perForm [name=state]").value = p.state.code; $("#perForm [name=zip]").value = ""; $("#perForm").requestSubmit(); });
   $("#descMore")?.addEventListener("click", (e) => { $("#desc").classList.toggle("full"); e.target.textContent = $("#desc").classList.contains("full") ? "Show less" : "Show all"; });
   if (d.naics) api("sba_size_standard", { naics: d.naics }).then((r) => { const s = r.data; if ($("#sizeStd") && s.found) $("#sizeStd").textContent = `${s.description}. Small if ${s.revenueLimitUSD ? "under " + money(s.revenueLimitUSD) + " receipts" : s.employeeCountLimit ? "under " + s.employeeCountLimit + " employees" : "within SBA limit"}`; }).catch(() => {});
   const shell = intelShell(); $("#nIntel").innerHTML = shell.html;
@@ -655,6 +691,72 @@ async function openGrant(g) {
   $("#gdescMore")?.addEventListener("click", (e) => { $("#gdesc").classList.toggle("full"); e.target.textContent = $("#gdesc").classList.contains("full") ? "Show less" : "Show all"; });
 }
 
+/* ---------- PRICING tab (GSA CALC labor rates + per diem) ---------- */
+const rate = (n) => n == null ? "n/a" : "$" + Number(n).toFixed(2);
+$("#perState").innerHTML = '<option value="">State</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
+$("#laborForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#laborOut"), btn = $("#laborGo");
+  const args = clean({ laborCategory: f.laborCategory.trim(), businessSize: f.businessSize, educationLevel: f.educationLevel, minYearsExperience: f.minYearsExperience ? +f.minYearsExperience : "", sin: f.sin.trim() });
+  btn.disabled = true; out.innerHTML = loading("Looking up awarded rates…");
+  try {
+    const d = (await api("gsa_benchmark_labor_rates", args)).data, c = d.currentRate;
+    if (!c || !d.matchCount) { out.innerHTML = '<div class="state">No awarded rates matched. CALC matches the category title exactly, so try a common title like "Program Manager" or "Software Engineer", or remove a filter.</div>'; return; }
+    const span = c.max - c.min || 1, at = (v) => Math.max(0, Math.min(100, ((v - c.min) / span) * 100));
+    const rows = (d.sampleRows || []).slice().sort((a, b) => a.currentRate - b.currentRate);
+    const pick = rows.filter((_, i) => i % Math.max(1, Math.floor(rows.length / 15)) === 0).slice(0, 15);
+    out.innerHTML = `<div class="kpis"><div class="kpi"><b>${rate(c.median)}</b><span>median hourly ceiling rate</span></div><div class="kpi"><b>${rate(c.min)} to ${rate(c.max)}</b><span>lowest to highest awarded</span></div><div class="kpi"><b>${d.matchCount.toLocaleString()}${d.matchCountSaturated ? "+" : ""}</b><span>awarded rates for this title</span></div></div>
+      <div class="panel" style="margin-top:12px"><h2>Where a bid would land</h2>
+        <div class="rng" role="img" aria-label="Rates run from ${rate(c.min)} to ${rate(c.max)}, median ${rate(c.median)}"><span class="rngbar"></span><span class="rngmid" style="left:${at(c.median)}%"></span></div>
+        <div class="row small muted" style="justify-content:space-between"><span>${rate(c.min)}</span><span>median ${rate(c.median)}</span><span>${rate(c.max)}</span></div>
+        ${d.escalatedRate ? `<p class="muted small">Median after annual escalation: ${rate(d.escalatedRate.nextYearMedian)} next year, ${rate(d.escalatedRate.secondYearMedian)} the year after.</p>` : ""}
+        <p class="muted small">These are GSA ceiling rates, fully burdened. Real awards are usually negotiated below the ceiling, so treat the median as the top of a competitive price, not a target. Based on ${d.sampleSize} sampled rows.</p></div>
+      <div class="panel" style="margin-top:12px"><h2>Sample of awarded rates</h2><div id="laborTbl"></div></div>`;
+    $("#laborTbl").innerHTML = table([
+      { h: "Vendor", f: (x) => esc(title(x.vendor)) },
+      { h: "Rate", num: 1, f: (x) => rate(x.currentRate) },
+      { h: "Education", f: (x) => esc(x.educationLevel || "") },
+      { h: "Years", num: 1, f: (x) => x.minYearsExperience ?? "" },
+      { h: "Size", f: (x) => x.businessSize === "S" ? "Small" : "Other" },
+      { h: "Worksite", f: (x) => esc(String(x.worksite || "").replace(/_/g, " ")) },
+    ], pick);
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+let perDiemRow = null;
+function drawTrip() {
+  const host = $("#tripOut"); if (!perDiemRow) return;
+  const m = +$("#tripMonth").value, n = Math.max(1, +$("#tripNights").value || 1);
+  const lodge = (perDiemRow.monthlyLodgingUsd.find((x) => x.month === m) || {}).lodgingUsd, meals = perDiemRow.mealsUsd;
+  if (lodge == null || meals == null) { host.textContent = "No rate published for that month."; return; }
+  const total = lodge * n + meals * (n - 1) + 2 * 0.75 * meals;
+  const usd = (v) => "$" + Math.round(v).toLocaleString();
+  host.innerHTML = `<b>${usd(total)}</b> per traveler for ${n} night${n === 1 ? "" : "s"}: lodging ${usd(lodge * n)} (${n} × $${lodge}) plus meals ${usd(meals * (n - 1) + 1.5 * meals)} (first and last travel days at 75%).`;
+}
+$("#tripMonth").innerHTML = ["January","February","March","April","May","June","July","August","September","October","November","December"].map((m, i) => `<option value="${i + 1}">${m}</option>`).join("");
+$("#tripMonth").value = String(new Date().getMonth() + 1);
+$("#tripMonth").addEventListener("change", drawTrip); $("#tripNights").addEventListener("input", drawTrip);
+async function runPerDiem(args) {
+  const out = $("#perOut"), btn = $("#perGo"); btn.disabled = true; out.innerHTML = loading("Looking up per diem…"); $("#tripBox").classList.add("hidden");
+  try {
+    const rows = (await api("gsa_perdiem_rates", args)).data.rates || [];
+    if (!rows.length) { out.innerHTML = '<div class="state">No per diem rate found. Check the city spelling or use a ZIP code.</div>'; return; }
+    const r = rows[0]; perDiemRow = r;
+    const L = r.monthlyLodgingUsd.map((x) => x.lodgingUsd).filter((v) => v != null);
+    out.innerHTML = `<div class="kpis"><div class="kpi"><b>$${r.mealsUsd ?? "n/a"}</b><span>meals and incidentals per day</span></div><div class="kpi"><b>$${Math.min(...L)} to $${Math.max(...L)}</b><span>lodging per night, by season</span></div></div>
+      <div class="panel" style="margin-top:12px"><h2>Lodging ceiling by month</h2><p class="muted small" style="margin-top:-6px">${esc(r.city || "")}${r.state ? ", " + esc(r.state) : ""}, fiscal year ${r.fiscalYear}.${r.standardRate ? " This area uses the standard federal rate." : ""}${r.county ? " Covers " + esc(r.county) + "." : ""}</p><div id="perBars"></div></div>`;
+    barChart($("#perBars"), r.monthlyLodgingUsd.map((x) => ({ label: x.monthName, value: x.lodgingUsd || 0, display: "$" + x.lodgingUsd })));
+    $("#tripBox").classList.remove("hidden"); drawTrip();
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+}
+$("#perForm").addEventListener("submit", (e) => {
+  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target));
+  if (f.zip.trim()) runPerDiem({ zip: f.zip.trim() });
+  else if (f.city.trim() && f.state) runPerDiem({ city: f.city.trim(), state: f.state });
+  else $("#perOut").innerHTML = '<div class="state err" role="alert">Enter a city and state, or a ZIP code.</div>';
+});
+
 /* ---------- MARKET tab ---------- */
 let agenciesLoaded = false;
 async function loadAgencies() {
@@ -815,7 +917,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "market", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
