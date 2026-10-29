@@ -34,7 +34,64 @@ import { renderDataMapMarkdown } from "../node_modules/@cliwant/mcp-sam-gov/dist
 // Workers' fetch rejects `redirect: "error"`, which many tools in the package use
 // as an SSRF guard. Keep the same guarantee: request "manual" and throw on any 3xx.
 const nativeFetch = globalThis.fetch.bind(globalThis);
+
+// Some government hosts sit behind Cloudflare and answer HTTP 525 to requests that come from inside
+// Cloudflare (i.e. this Worker), so those calls go through a relay hosted elsewhere (see relay/).
+const RELAY_HOSTS = new Set(["api.usaspending.gov", "sanctionslistservice.ofac.treas.gov"]);
+let relayCfg: { base: string; token: string } | undefined;
+
+async function relayFetch(input: any, init: any): Promise<Response> {
+  const mode = init?.redirect; // "follow" (default) | "manual" | "error"
+  let current = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url);
+  let method = String(init?.method ?? "GET").toUpperCase();
+  let body = init?.body;
+  for (let hop = 0; hop < 6; hop++) {
+    let res: Response;
+    if (RELAY_HOSTS.has(current.hostname) && relayCfg) {
+      const headers = new Headers(init?.headers);
+      headers.set("x-relay-token", relayCfg.token);
+      res = await nativeFetch(`${relayCfg.base}/${current.hostname}${current.pathname}${current.search}`, {
+        method, headers, body, signal: init?.signal, redirect: "manual",
+      });
+    } else {
+      res = await nativeFetch(current.href, { method, headers: init?.headers, body, signal: init?.signal, redirect: "manual" });
+    }
+    const loc = res.headers.get("location");
+    if (res.status >= 300 && res.status < 400 && loc) {
+      if (mode === "manual") return res;
+      if (mode === "error") throw new TypeError("fetch failed: unexpected redirect (redirect: error)");
+      current = new URL(loc, current);
+      if (res.status === 303 || ((res.status === 301 || res.status === 302) && method === "POST")) { method = "GET"; body = undefined; }
+      continue;
+    }
+    // Report the real final URL: tools check it against an allowlisted host (OFAC does).
+    Object.defineProperty(res, "url", { value: current.href });
+    Object.defineProperty(res, "redirected", { value: hop > 0 });
+    return res;
+  }
+  throw new TypeError("fetch failed: too many redirects");
+}
+
 async function rawFetch(input: any, init?: any): Promise<Response> {
+  if (relayCfg) {
+    try {
+      const raw = typeof input === "string" ? input : input instanceof URL ? input.href : input?.url;
+      const h = new URL(raw).hostname;
+      if (RELAY_HOSTS.has(h)) return relayFetch(input, init);
+      // A direct call that redirects into a relayed host (e.g. www.treasury.gov -> sanctionslistservice).
+      if (!init?.redirect || init.redirect === "follow") {
+        const first = await nativeFetch(input, { ...init, redirect: "manual" });
+        const loc = first.headers.get("location");
+        if (first.status >= 300 && first.status < 400 && loc && RELAY_HOSTS.has(new URL(loc, raw).hostname)) {
+          return relayFetch(new URL(loc, raw).href, { ...init, method: "GET", body: undefined });
+        }
+        if (first.status >= 300 && first.status < 400) return nativeFetch(input, init);
+        return first;
+      }
+    } catch (e) {
+      if (e instanceof TypeError && /redirect/.test(e.message)) throw e;
+    }
+  }
   if (init?.redirect === "error") {
     const res = await nativeFetch(input, { ...init, redirect: "manual" });
     if (res.status >= 300 && res.status < 400) {
@@ -154,6 +211,8 @@ interface Env {
   MCP_SAM_GOV_TOOLSETS?: string;
   /** KV namespace for the upstream response cache. Unset = no caching. */
   CACHE?: KVNamespace;
+  GOV_RELAY_URL?: string;
+  RELAY_TOKEN?: string;
 }
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
@@ -319,6 +378,7 @@ function buildServer(
 export default {
   async fetch(req: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(req.url);
+    relayCfg = env.GOV_RELAY_URL && env.RELAY_TOKEN ? { base: env.GOV_RELAY_URL.replace(/\/$/, ""), token: env.RELAY_TOKEN } : undefined;
 
     if (url.pathname === "/health") {
       return new Response("ok");

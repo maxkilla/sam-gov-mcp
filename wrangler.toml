@@ -13,6 +13,11 @@ keep_vars = true
 binding = "CACHE"
 id = "2e6735d50f1a4b2fa2f7de0604d1bbf2"
 
+# USAspending and OFAC reject requests from inside Cloudflare (HTTP 525), so they go through this relay.
+# Source: relay/index.ts (a Supabase edge function). Also set the RELAY_TOKEN secret.
+[vars]
+GOV_RELAY_URL = "https://lnnizyeugffmkzdkoqjw.supabase.co/functions/v1/gov-relay"
+
 # Secrets (never put these here):
 #   wrangler secret put MCP_AUTH_TOKEN     # required: bearer token for your agents
 #   wrangler secret put SAM_GOV_API_KEY    # optional: only for the 5 key-gated tools
