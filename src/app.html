@@ -139,6 +139,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <button role="tab" data-tab="bids" aria-selected="true">Bids</button>
     <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
     <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
+    <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
     <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
@@ -181,6 +182,22 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <h1>Saved searches</h1>
     <p class="lede">Searches you want watched. They refresh every morning, and new notices are flagged here.</p>
     <div id="savedOut"></div>
+  </section>
+
+  <!-- GRANTS -->
+  <section id="tab-grants" class="hidden">
+    <h1>Grants</h1>
+    <p class="lede">Search federal grants and cooperative agreements on Grants.gov. These are funding opportunities, separate from the contracts on the Bids tab.</p>
+    <div class="panel">
+      <form class="filters" id="grantForm">
+        <label class="wide">Keyword<input name="keyword" placeholder="cybersecurity (one specific word works best)"></label>
+        <label>Agency<select name="agency" id="grantAgency"><option value="">All agencies</option></select></label>
+        <label>Status<select name="status"><option value="forecasted,posted">Open and forecast</option><option value="posted">Open now</option><option value="forecasted">Forecast only</option><option value="closed">Closed</option><option value="archived">Archived</option></select></label>
+        <label>Assistance listing<input name="cfda" placeholder="47.076" pattern="[0-9]{2}\.[0-9]{3}"></label>
+        <div><button class="btn" type="submit" id="grantGo">Search grants</button></div>
+      </form>
+    </div>
+    <div id="grantOut" style="margin-top:16px"></div>
   </section>
 
   <!-- MARKET -->
@@ -379,9 +396,10 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "pipeline", "saved", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "pipeline", "saved", "grants", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
+  if (t === "grants") loadGrantAgencies();
   if (t === "pipeline") loadPipeline();
   if (t === "saved") loadSaved();
   try { history.replaceState(null, "", "#" + t); } catch {}
@@ -561,6 +579,80 @@ async function enrich() {
   const worker = async () => { while (todo.length) { const n = todo.shift(); try { const d = (await api("sam_get_opportunity", { noticeId: n.noticeId })).data; bidState.enriched.set(n.noticeId, { naics: d.naics, setAside: d.setAside }); } catch (e) { failed++; if (e.kind === "auth") return; } done++; msg.textContent = `Reading notice details: ${done} of ${done + todo.length}${failed ? ` (${failed} failed)` : ""}`; } };
   await Promise.all([worker(), worker(), worker(), worker()]);
   renderBids(); $("#enrichMsg").textContent = failed ? `${failed} notices could not be read and are shown as not specified.` : "";
+}
+
+/* ---------- GRANTS tab ---------- */
+const gDate = (s) => { const m = /^(\d\d)\/(\d\d)\/(\d{4})$/.exec(s || ""); if (m) return new Date(+m[3], +m[1] - 1, +m[2], 23, 59).toISOString(); const t = Date.parse(s || ""); return isNaN(t) ? null : new Date(t).toISOString(); };
+const gShow = (s) => { const t = Date.parse(String(s || "").replace(/^([A-Za-z]{3} \d\d, \d{4}).*$/, "$1")); return isNaN(t) ? esc(s || "n/a") : new Date(t).toLocaleDateString(undefined, { year: "numeric", month: "short", day: "numeric" }); };
+const gText = (t) => { try { return new DOMParser().parseFromString(String(t || ""), "text/html").documentElement.textContent; } catch { return String(t || ""); } };
+const gLink = (id) => "https://www.grants.gov/search-results-detail/" + id;
+const G_STATUS = { posted: "Open", forecasted: "Forecast", closed: "Closed", archived: "Archived" };
+let grantAgenciesLoaded = false;
+async function loadGrantAgencies() {
+  if (grantAgenciesLoaded) return;
+  const sel = $("#grantAgency");
+  try {
+    const r = await fetch("/api/grants/agencies", { headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) { showLogin("That token was not accepted."); return; }
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || "failed");
+    sel.innerHTML = '<option value="">All agencies</option>' + j.agencies.map((a) => `<option value="${esc(a.value)}">${esc(a.label)}</option>`).join("");
+    grantAgenciesLoaded = true;
+  } catch { sel.innerHTML = '<option value="">All agencies</option>'; }
+}
+$("#grantForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#grantOut"), btn = $("#grantGo");
+  const args = clean({ keyword: f.keyword, agency: f.agency, cfda: f.cfda, oppStatuses: f.status ? f.status.split(",") : undefined, rows: 50 });
+  btn.disabled = true; out.innerHTML = loading("Searching Grants.gov…");
+  try {
+    const r = await api("grants_search", args);
+    const items = (r.data.grants || []).map((g) => ({ ...g, title: gText(g.title) })), total = r.data.totalRecords || 0;
+    if (!items.length) { out.innerHTML = '<div class="state">No grants matched. Try one keyword instead of several, or clear the agency.</div>'; return; }
+    const soon = items.filter((g) => { const d = daysUntil(gDate(g.closeDate)); return d != null && d >= 0 && d <= 30; }).length;
+    const byAgency = {}; items.forEach((g) => { byAgency[g.agencyName] = (byAgency[g.agencyName] || 0) + 1; });
+    const bars = Object.entries(byAgency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => ({ label: k, value: v, display: String(v) }));
+    out.innerHTML = `<div class="kpis"><div class="kpi"><b>${total.toLocaleString()}</b><span>matching opportunities</span></div><div class="kpi"><b>${soon}</b><span>of the ${items.length} shown close within 30 days</span></div></div>
+      <div class="panel" style="margin-top:12px"><h2>Who is funding this</h2><p class="muted small" style="margin-top:-6px">Agencies among the ${items.length} results shown.</p><div id="gBars"></div></div>
+      <div class="panel" style="margin-top:12px"><h2>Opportunities</h2>${total > items.length ? `<p class="muted small" style="margin-top:-6px">Showing the first ${items.length} of ${total.toLocaleString()}. Grants.gov does not page results, so narrow with an agency, program number or a more specific keyword.</p>` : ""}<div id="gTable"></div></div>`;
+    barChart($("#gBars"), bars);
+    $("#gTable").innerHTML = table([
+      { h: "Opportunity", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.opportunityNumber || "")}</span>` },
+      { h: "Agency", f: (x) => esc(x.agencyName || x.agencyCode || "") },
+      { h: "Status", f: (x) => `<span class="pill ${x.status === "posted" ? "ok" : ""}">${esc(G_STATUS[x.status] || x.status || "")}</span>` },
+      { h: "Closes", f: (x) => x.closeDate ? dueLabel(gDate(x.closeDate)) : '<span class="muted">not set</span>' },
+    ], items, { onRow: 1 });
+    $$("#gTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openGrant(items[+tr.dataset.i])));
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+async function openGrant(g) {
+  openDrawer("Grant", `<h1>${esc(gText(g.title))}</h1><p class="muted">${esc(g.agencyName || "")} · ${esc(g.opportunityNumber || "")}</p><div id="gDetail">${loading("Loading grant detail…")}</div>`);
+  let d;
+  try { d = (await api("grants_get_opportunity", { opportunityId: String(g.id) })).data; }
+  catch (e) { $("#gDetail").innerHTML = errBox(e); return; }
+  if (!d.found) { $("#gDetail").innerHTML = '<div class="state">Grants.gov has no detail for this opportunity.</div>'; return; }
+  const text = (() => { try { return new DOMParser().parseFromString(String(d.description || ""), "text/html").body.textContent.trim(); } catch { return ""; } })();
+  const list = (a) => (a && a.length ? esc(a.join(", ")) : "n/a");
+  $("#gDetail").innerHTML = `<div class="panel"><dl class="facts">
+      <dt>Closes</dt><dd>${gDate(g.closeDate || d.responseDate) ? dueLabel(gDate(g.closeDate || d.responseDate)) : "not set"}</dd>
+      <dt>Posted</dt><dd>${gShow(d.postingDate)}</dd>
+      <dt>Agency</dt><dd>${esc([d.agency.department, d.agency.name].filter((v, i, a) => v && a.indexOf(v) === i).join(" › ") || g.agencyName || "n/a")}</dd>
+      <dt>Award size</dt><dd>${d.awardFloor || d.awardCeiling ? `${money(d.awardFloor || 0)} to ${money(d.awardCeiling)}` : "n/a"}</dd>
+      <dt>Total funding</dt><dd>${d.estimatedFunding ? money(d.estimatedFunding) : "n/a"}${d.expectedNumberOfAwards ? ` <span class="muted small">(about ${d.expectedNumberOfAwards} awards)</span>` : ""}</dd>
+      <dt>Who can apply</dt><dd>${list(d.applicantTypes)}</dd>
+      <dt>Type of funding</dt><dd>${list(d.fundingInstruments)}</dd>
+      <dt>Category</dt><dd>${list(d.fundingCategories)}</dd>
+      <dt>Assistance listing</dt><dd>${(d.cfdaPrograms || []).map((c) => esc(c.number + " " + c.title)).join("<br>") || "n/a"}</dd>
+    </dl>
+    ${text ? `<h3 style="margin-top:14px">Description</h3><div class="desc" id="gdesc">${esc(text)}</div><button class="linkbtn" id="gdescMore">Show all</button>` : ""}
+    <div class="row" style="margin-top:12px"><a href="${esc(gLink(g.id))}" target="_blank" rel="noopener noreferrer">Open on Grants.gov</a>
+      <span style="flex:1"></span><span id="gPipeMsg" class="small muted" aria-live="polite"></span><button class="btn ghost" id="gPipeAdd">Add to pipeline</button></div></div>`;
+  $("#gPipeAdd").addEventListener("click", async () => {
+    try { await store("PUT", "pipeline/grant-" + g.id, { title: g.title, agency: d.agency.name || g.agencyName, due: gDate(g.closeDate || d.responseDate), uiLink: gLink(g.id), status: "watching" }); $("#gPipeMsg").textContent = "Added. Manage it on the Pipeline tab."; $("#gPipeAdd").disabled = true; }
+    catch (err) { if (err.kind !== "auth") $("#gPipeMsg").textContent = "Could not save: " + err.message; }
+  });
+  $("#gdescMore")?.addEventListener("click", (e) => { $("#gdesc").classList.toggle("full"); e.target.textContent = $("#gdesc").classList.contains("full") ? "Show less" : "Show all"; });
 }
 
 /* ---------- MARKET tab ---------- */

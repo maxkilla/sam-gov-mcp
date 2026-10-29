@@ -422,6 +422,34 @@ export default {
       return json({ colo: (req as any).cf?.colo, results: out });
     }
 
+    if (url.pathname === "/api/grants/agencies") {
+      // Department list for the Grants tab dropdown. Grants.gov only filters by a pipe-joined list of
+      // sub-agency codes, so each department's value is built from its current sub-agencies.
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const key = "grants-agencies:v1";
+      const hit = env.CACHE ? await env.CACHE.get(key, "json") : null;
+      if (hit) return json(hit);
+      try {
+        const r = await fetch("https://api.grants.gov/v1/api/search2", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ rows: 1, oppStatuses: "forecasted|posted" }),
+          signal: AbortSignal.timeout(15000),
+        });
+        const j: any = await r.json();
+        const agencies = (j?.data?.agencies ?? []).map((a: any) => ({
+          label: a.label,
+          value: (a.subAgencyOptions?.length ? a.subAgencyOptions.map((x: any) => x.value) : [a.value]).join("|"),
+        }));
+        if (!agencies.length) return json({ error: "Grants.gov returned no agency list" }, 502);
+        const body = { agencies };
+        if (env.CACHE) ctx.waitUntil(env.CACHE.put(key, JSON.stringify(body), { expirationTtl: 43200 }));
+        return json(body);
+      } catch (e: any) {
+        return json({ error: "Grants.gov agency list unavailable: " + String(e?.message || e) }, 502);
+      }
+    }
+
     if (url.pathname === "/api/tools" || url.pathname === "/api/tool") {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       if (url.pathname === "/api/tools") {
