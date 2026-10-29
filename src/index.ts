@@ -1,5 +1,6 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import APP_HTML from "./app.html";
+import { handleStore, runAllSavedSearches } from "./store.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -213,6 +214,7 @@ interface Env {
   CACHE?: KVNamespace;
   GOV_RELAY_URL?: string;
   RELAY_TOKEN?: string;
+  DB?: D1Database;
 }
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
@@ -447,6 +449,13 @@ export default {
       return json(envelope, 200);
     }
 
+    if (url.pathname.startsWith("/api/store")) {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
+      const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
+      return handleStore(req, url, env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope);
+    }
+
     if (url.pathname !== "/mcp") {
       return new Response("Not found", { status: 404 });
     }
@@ -473,5 +482,16 @@ export default {
     });
     await server.connect(transport);
     return transport.handleRequest(req);
+  },
+
+  // Daily cron: refresh saved searches so new notices are flagged in the dashboard.
+  async scheduled(_event: ScheduledEvent, env: Env, ctx: ExecutionContext): Promise<void> {
+    if (!env.DB) return;
+    relayCfg = env.GOV_RELAY_URL && env.RELAY_TOKEN ? { base: env.GOV_RELAY_URL.replace(/\/$/, ""), token: env.RELAY_TOKEN } : undefined;
+    const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
+    const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
+    ctx.waitUntil(
+      runAllSavedSearches(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope),
+    );
   },
 };
