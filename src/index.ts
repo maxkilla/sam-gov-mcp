@@ -336,6 +336,30 @@ export default {
       });
     }
 
+    if (url.pathname === "/api/diag") {
+      // Reachability of the upstream APIs from this Worker (fixed list, no user-supplied URLs).
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const targets: [string, string, RequestInit?][] = [
+        ["usaspending", "https://api.usaspending.gov/api/v2/references/toptier_agencies/"],
+        ["usaspending-post", "https://api.usaspending.gov/api/v2/autocomplete/naics/", { method: "POST", headers: { "content-type": "application/json" }, body: '{"search_text":"computer","limit":2}' }],
+        ["sam", "https://sam.gov/api/prod/sgs/v1/search/?index=opp&page=0&size=1&mode=search&q=test"],
+        ["treasury", "https://www.treasury.gov/ofac/downloads/sdn.csv", { method: "HEAD" }],
+        ["ofac-service", "https://sanctionslistservice.ofac.treas.gov/", { method: "HEAD" }],
+      ];
+      const out = await Promise.all(
+        targets.map(async ([name, u, init]) => {
+          const t0 = Date.now();
+          try {
+            const r = await rawFetch(u, { ...(init ?? {}), redirect: "manual", signal: AbortSignal.timeout(8000) });
+            return { name, status: r.status, ms: Date.now() - t0, location: r.headers.get("location") };
+          } catch (e: any) {
+            return { name, error: String(e?.message || e), ms: Date.now() - t0 };
+          }
+        }),
+      );
+      return json({ colo: (req as any).cf?.colo, results: out });
+    }
+
     if (url.pathname === "/api/tools" || url.pathname === "/api/tool") {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       if (url.pathname === "/api/tools") {
