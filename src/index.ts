@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import APP_HTML from "./app.html";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -60,6 +61,8 @@ interface CachedEntry {
   body: string;
   contentType: string;
   storedAt: number;
+  /** Final URL after redirects (tools check it against an allowlisted host). */
+  finalUrl?: string;
 }
 const cacheALS = new AsyncLocalStorage<CacheStore>();
 
@@ -97,7 +100,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
   const ttl = ttlSeconds(host);
   if (ttl === 0) return rawFetch(input, init);
 
-  const key = "v1:" + (await sha256Hex(`${method} ${url} ${body ?? ""}`));
+  const key = "v2:" + (await sha256Hex(`${method} ${url} ${body ?? ""}`));
   try {
     const hit = await store.kv.get<CachedEntry>(key, "json");
     if (hit && typeof hit.body === "string") {
@@ -106,10 +109,13 @@ globalThis.fetch = (async (input: any, init?: any) => {
         store.oldestAgeSeconds,
         Math.round((Date.now() - hit.storedAt) / 1000),
       );
-      return new Response(hit.body, {
+      const cached = new Response(hit.body, {
         status: 200,
         headers: { "content-type": hit.contentType, "x-mcp-cache": "HIT" },
       });
+      // Some tools verify res.url (SSRF guard on the final host); a constructed Response has none.
+      Object.defineProperty(cached, "url", { value: hit.finalUrl || url });
+      return cached;
     }
   } catch {
     // KV read failed: fall through to a live fetch.
@@ -125,6 +131,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
           body: text,
           contentType: res.headers.get("content-type") ?? "application/json",
           storedAt: Date.now(),
+          finalUrl: res.url || url,
         };
         // Best-effort write (e.g. the free plan's daily KV write cap can reject it).
         store.ctx.waitUntil(
@@ -151,6 +158,13 @@ interface Env {
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
 
+function json(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
 function timingSafeEqual(a: string, b: string): boolean {
   const enc = new TextEncoder();
   const x = enc.encode(a);
@@ -167,6 +181,45 @@ function authorized(req: Request, env: Env): boolean {
   const header = req.headers.get("authorization") ?? "";
   const m = /^Bearer\s+(.+)$/i.exec(header);
   return !!m && timingSafeEqual(m[1].trim(), env.MCP_AUTH_TOKEN);
+}
+
+/** Run one tool and return the {ok,data,_meta} / {ok:false,error} envelope (shared by /mcp and /api). */
+async function runEnvelope(
+  sam: any,
+  name: string,
+  args: unknown,
+  cacheCfg: { kv: KVNamespace; ctx: ExecutionContext } | undefined,
+): Promise<{ envelope: Record<string, unknown>; isError: boolean }> {
+  const store: CacheStore | undefined = cacheCfg
+    ? { ...cacheCfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }
+    : undefined;
+  const exec = async () => {
+    try {
+      const raw = await runTool(name, (args ?? {}) as Record<string, unknown>, sam);
+      const data = isMetaBundle(raw) ? raw.data : raw;
+      const baseMeta = isMetaBundle(raw) ? buildMeta(raw.meta) : buildMeta({});
+      const _meta = store
+        ? {
+            ...baseMeta,
+            cache: {
+              hits: store.hits,
+              misses: store.misses,
+              servedFromCache: store.hits > 0,
+              ...(store.hits > 0
+                ? {
+                    oldestCachedAgeSeconds: store.oldestAgeSeconds,
+                    note: "Some upstream data came from a short-lived cache (10-60 min depending on source). Add ?cache=off to the MCP URL for live data.",
+                  }
+                : {}),
+            },
+          }
+        : baseMeta;
+      return { envelope: { ok: true, data, _meta }, isError: false };
+    } catch (err) {
+      return { envelope: { ok: false, error: toToolError(err, name) }, isError: true };
+    }
+  };
+  return store ? cacheALS.run(store, exec) : exec();
 }
 
 function buildServer(
@@ -253,44 +306,11 @@ function buildServer(
         isError: true,
       };
     }
-    const store: CacheStore | undefined = cacheCfg
-      ? { ...cacheCfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }
-      : undefined;
-    const exec = async () => {
-    try {
-      const raw = await runTool(name, (args ?? {}) as Record<string, unknown>, sam);
-      const data = isMetaBundle(raw) ? raw.data : raw;
-      const baseMeta = isMetaBundle(raw) ? buildMeta(raw.meta) : buildMeta({});
-      const _meta = store
-        ? {
-            ...baseMeta,
-            cache: {
-              hits: store.hits,
-              misses: store.misses,
-              servedFromCache: store.hits > 0,
-              ...(store.hits > 0
-                ? {
-                    oldestCachedAgeSeconds: store.oldestAgeSeconds,
-                    note: "Some upstream data came from a short-lived cache (10-60 min depending on source). Add ?cache=off to the MCP URL for live data.",
-                  }
-                : {}),
-            },
-          }
-        : baseMeta;
-      return {
-        content: [
-          { type: "text", text: JSON.stringify({ ok: true, data, _meta }, null, 2) },
-        ],
-      };
-    } catch (err) {
-      const error = toToolError(err, name);
-      return {
-        content: [{ type: "text", text: JSON.stringify({ ok: false, error }, null, 2) }],
-        isError: true,
-      };
-    }
+    const { envelope, isError } = await runEnvelope(sam, name, args, cacheCfg);
+    return {
+      content: [{ type: "text", text: JSON.stringify(envelope, null, 2) }],
+      ...(isError ? { isError: true } : {}),
     };
-    return store ? cacheALS.run(store, exec) : exec();
   });
 
   return server;
@@ -302,6 +322,45 @@ export default {
 
     if (url.pathname === "/health") {
       return new Response("ok");
+    }
+
+    if (url.pathname === "/app" || url.pathname === "/app/") {
+      // The page itself holds no data and no secrets; it asks for the token in the browser.
+      return new Response(APP_HTML, {
+        headers: {
+          "content-type": "text/html; charset=utf-8",
+          "cache-control": "no-store",
+          "x-robots-tag": "noindex, nofollow",
+          "referrer-policy": "no-referrer",
+        },
+      });
+    }
+
+    if (url.pathname === "/api/tools" || url.pathname === "/api/tool") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      if (url.pathname === "/api/tools") {
+        return json({
+          tools: TOOLS.map((t: any) => ({
+            name: t.name,
+            description: t.description,
+            inputSchema: zodToJsonSchema(t.inputSchema),
+          })),
+        });
+      }
+      if (req.method !== "POST") return json({ error: "POST required" }, 405);
+      let body: any;
+      try {
+        body = await req.json();
+      } catch {
+        return json({ error: "invalid JSON body" }, 400);
+      }
+      const name = typeof body?.name === "string" ? body.name : "";
+      if (!TOOLS.some((t: any) => t.name === name)) return json({ error: `unknown tool '${name}'` }, 404);
+      const cache =
+        env.CACHE && url.searchParams.get("cache") !== "off" ? { kv: env.CACHE, ctx } : undefined;
+      const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
+      const { envelope } = await runEnvelope(sam, name, body?.args, cache);
+      return json(envelope, 200);
     }
 
     if (url.pathname !== "/mcp") {
