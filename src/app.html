@@ -403,7 +403,7 @@ async function runIntel(ids, { agency, naics }) {
       lineChart(h, (r.data.timeline || []).filter((t) => +t.timePeriod.fiscal_year <= lastFullFY()).map((t) => ({ label: "FY" + String(t.timePeriod.fiscal_year).slice(2), value: t.total || 0 })));
     }),
     job(ids.c, async (h) => {
-      const r = await api("usas_search_expiring_contracts", clean({ agency, naics, monthsUntilExpiry: 18, limit: 40 }));
+      const r = await api("usas_search_expiring_contracts", clean({ agency, naics, monthsUntilExpiry: 18, limit: 20 }));
       const rows = (r.data.contracts || []).filter((x) => x.daysUntilExpiry >= 0).sort((a, b) => a.daysUntilExpiry - b.daysUntilExpiry).slice(0, 15);
       h.innerHTML = table([
         { h: "Incumbent", f: (x) => `<a href="#" data-vet="${esc(x.recipient)}">${esc(title(x.recipient))}</a>` },
