@@ -28,10 +28,11 @@ export async function runSavedSearch(db: D1Database, id: number, run: RunTool) {
   const known = new Set<string>(parse(row.known_ids, []));
   const fresh = new Set<string>(parse(row.new_ids, []));
   const firstRun = !row.last_run_at;
+  const added: any[] = [];
   for (const o of opps) {
     if (!known.has(o.noticeId)) {
       known.add(o.noticeId);
-      if (!firstRun) fresh.add(o.noticeId); // the first run is the baseline, not "new"
+      if (!firstRun) { fresh.add(o.noticeId); added.push(o); } // the first run is the baseline, not "new"
     }
   }
   const knownList = [...known].slice(-2000);
@@ -39,19 +40,7 @@ export async function runSavedSearch(db: D1Database, id: number, run: RunTool) {
     .prepare("UPDATE saved_searches SET last_run_at=?, last_total=?, known_ids=?, new_ids=? WHERE id=?")
     .bind(now(), env.data.totalRecords ?? opps.length, JSON.stringify(knownList), JSON.stringify([...fresh]), id)
     .run();
-  return { opportunities: opps, total: env.data.totalRecords ?? opps.length, newIds: [...fresh] };
-}
-
-/** Cron: refresh every saved search. */
-export async function runAllSavedSearches(db: D1Database, run: RunTool) {
-  const { results } = await db.prepare("SELECT id FROM saved_searches").all<{ id: number }>();
-  for (const r of results) {
-    try {
-      await runSavedSearch(db, r.id, run);
-    } catch {
-      // keep going; one failing search must not block the rest
-    }
-  }
+  return { opportunities: opps, total: env.data.totalRecords ?? opps.length, newIds: [...fresh], added };
 }
 
 export async function handleStore(req: Request, url: URL, db: D1Database | undefined, run: RunTool): Promise<Response> {
