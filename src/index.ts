@@ -3,6 +3,9 @@ import APP_HTML from "./app.html";
 import { handleStore } from "./store.js";
 import { refreshWatched, purgeLocal } from "./local.js";
 import { rankTexts, categorizeTexts } from "./rank.js";
+import { grantPayload, searchGrants } from "./grants.js";
+import { buildIcs } from "./calendar.js";
+import { purgeRecompetes } from "./recompete.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -471,50 +474,42 @@ export default {
     }
 
     if (url.pathname === "/api/grants/search" && req.method === "POST") {
-      // Grants.gov search with the filters the packaged tool does not expose: who can apply, funding type, category,
-      // posted-within, sort order and paging. Values are checked against allow-lists before they reach Grants.gov.
+      // Grants.gov search with the filters the packaged tool does not expose. Values are checked against allow-lists first.
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       const b: any = await req.json().catch(() => ({}));
-      const list = (v: unknown, ok: RegExp) => String(v ?? "").split("|").map((x) => x.trim()).filter((x) => ok.test(x)).join("|");
-      const STATUS = new Set(["forecasted", "posted", "closed", "archived"]);
-      const SORTS = new Set(["openDate|desc", "closeDate|asc", "closeDate|desc", "oppNum|asc"]);
-      const payload: Record<string, unknown> = {
-        keyword: String(b.keyword ?? "").slice(0, 200),
-        cfda: /^\d{2}\.\d{3}$/.test(String(b.cfda ?? "")) ? b.cfda : "",
-        agencies: list(b.agencies, /^[A-Za-z0-9._-]{2,30}$/),
-        eligibilities: list(b.eligibilities, /^\d{2}$/),
-        fundingInstruments: list(b.fundingInstruments, /^[A-Z]{1,2}$/),
-        fundingCategories: list(b.fundingCategories, /^[A-Z]{1,3}$/),
-        oppStatuses: list(b.oppStatuses, /^[a-z]+$/).split("|").filter((x) => STATUS.has(x)).join("|") || "forecasted|posted",
-        rows: Math.min(50, Math.max(1, Number(b.rows) || 50)),
-        startRecordNum: Math.max(0, Math.floor(Number(b.start) || 0)),
-      };
-      if (SORTS.has(b.sortBy)) payload.sortBy = b.sortBy;
-      if (/^(3|7|14|21|28|35|42|49|56)$/.test(String(b.dateRange ?? ""))) payload.dateRange = String(b.dateRange);
       const cfg = cacheFor(env, ctx);
-      const exec = async () => {
-        const r = await fetch("https://api.grants.gov/v1/api/search2", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify(payload),
-          signal: AbortSignal.timeout(20000),
-        });
-        if (!r.ok) throw new Error("Grants.gov answered " + r.status);
-        return (await r.json()) as any;
-      };
+      const exec = () => searchGrants(grantPayload(b));
       try {
-        const j = cfg ? await cacheALS.run({ ...cfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }, exec) : await exec();
-        const d = j?.data;
-        if (!d) return json({ error: "Grants.gov returned no data" }, 502);
-        const facet = (a: any[]) => (a || []).map((x) => ({ value: x.value, label: x.label, count: x.count }));
-        return json({
-          total: d.hitCount ?? 0,
-          items: (d.oppHits || []).map((h: any) => ({ id: h.id, number: h.number, title: h.title, agency: h.agency, agencyCode: h.agencyCode, openDate: h.openDate, closeDate: h.closeDate, status: h.oppStatus, docType: h.docType, cfda: h.cfdaList || [] })),
-          facets: { fundingCategories: facet(d.fundingCategories), eligibilities: facet(d.eligibilities), fundingInstruments: facet(d.fundingInstruments) },
-        });
+        return json(cfg ? await cacheALS.run({ ...cfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }, exec) : await exec());
       } catch (e: any) {
         return json({ error: "Grants.gov search unavailable: " + String(e?.message || e) }, 502);
       }
+    }
+
+    // Calendar of pipeline deadlines. The download needs the bearer token. The subscribe link carries its own secret
+    // key so a calendar app (which cannot send headers) can poll it; it exposes deadlines only, and can be reset.
+    if (url.pathname === "/api/calendar.ics" && req.method === "GET") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      if (!env.DB) return json({ error: "Storage is not set up." }, 503);
+      return new Response(await buildIcs(env.DB), { headers: { "content-type": "text/calendar; charset=utf-8", "content-disposition": 'attachment; filename="bid-deadlines.ics"', "cache-control": "no-store" } });
+    }
+    if (url.pathname === "/api/calendar/key" && (req.method === "GET" || req.method === "POST")) {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      if (!env.CACHE) return json({ error: "No key-value store is bound." }, 503);
+      let key = await env.CACHE.get("settings:calkey");
+      if (req.method === "POST" || !key) {
+        // POST always makes a new key (reset). GET only creates one the first time.
+        if (req.method === "GET" && !url.searchParams.has("create")) return json({ url: null });
+        key = [...crypto.getRandomValues(new Uint8Array(24))].map((x) => x.toString(16).padStart(2, "0")).join("");
+        await env.CACHE.put("settings:calkey", key);
+      }
+      return json({ url: `${url.origin}/cal/${key}.ics` });
+    }
+    const calM = /^\/cal\/([0-9a-f]{48})\.ics$/.exec(url.pathname);
+    if (calM && req.method === "GET") {
+      const key = env.CACHE ? await env.CACHE.get("settings:calkey") : null;
+      if (!key || key !== calM[1] || !env.DB) return new Response("Not found", { status: 404 });
+      return new Response(await buildIcs(env.DB), { headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "private, max-age=900" } });
     }
 
     if (url.pathname === "/api/grants/agencies") {
@@ -669,6 +664,7 @@ export default {
     // Daily: clean up expired rows, refresh saved searches and send the digest.
     ctx.waitUntil(env.DB.prepare("DELETE FROM http_cache WHERE expires_at < ?1").bind(Date.now()).run().catch(() => {}));
     ctx.waitUntil(purgeLocal(env.DB).catch(() => {}));
+    ctx.waitUntil(purgeRecompetes(env.DB).catch(() => {}));
     ctx.waitUntil(
       runDailyAlerts(env.DB, run, env.ALERT_WEBHOOK_URL?.trim() || undefined, env.CACHE ? await env.CACHE.get("settings:profile") : null),
     );

@@ -160,6 +160,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <button type="button" data-tab="bids" aria-current="true">Bids</button>
         <button type="button" data-tab="early">Early notices</button>
         <button type="button" data-tab="grants">Grants</button>
+        <button type="button" data-tab="recompete">Recompetes <span id="rcBadge" class="pill warn hidden"></span></button>
         <button type="button" data-tab="local">State and local</button>
       </div>
     </div>
@@ -238,6 +239,12 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
   <section id="tab-pipeline" class="hidden">
     <h1>Pipeline</h1>
     <p class="lede">Bids you are tracking. Add one from any notice panel, then set its status and keep notes here.</p>
+    <div id="calBar" class="row" style="margin-bottom:12px">
+      <button class="btn ghost" id="calDl" type="button">Download calendar file</button>
+      <button class="btn ghost" id="calSub" type="button">Get a subscribe link</button>
+      <span id="calMsg" class="muted small" aria-live="polite"></span>
+    </div>
+    <div id="calLink" class="hidden panel" style="margin-bottom:12px"></div>
     <div id="pipeOut"></div>
   </section>
 
@@ -247,6 +254,15 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <p class="lede">Searches you want watched. They refresh every morning, and new notices are flagged here.</p>
     <div id="alertBar" class="state" style="margin-bottom:12px"></div>
     <div id="savedOut"></div>
+    <h2 style="margin-top:22px">Saved grant searches</h2>
+    <div id="savedGrants"></div>
+  </section>
+
+  <!-- RECOMPETES -->
+  <section id="tab-recompete" class="hidden">
+    <h1>Recompetes</h1>
+    <p class="lede">Contracts that end in the next 18 months, in the areas you watch. Many of these are re-bid, so they are early leads. They refresh every morning from USAspending.</p>
+    <div id="rcOut"></div>
   </section>
 
   <!-- GRANTS -->
@@ -531,12 +547,13 @@ function setTab(t) {
   $$("nav [data-tab]").forEach((b) => { if (b.dataset.tab === t) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
   $$("nav .grp").forEach((g) => $(".grpbtn", g).classList.toggle("on", !!$('[data-tab="' + t + '"]', g)));
   closeMenus();
-  ["bids", "early", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
   if (t === "pipeline") loadPipeline();
   if (t === "saved") loadSaved();
+  if (t === "recompete") loadRecompete();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 function closeMenus(focusBtn) {
@@ -832,9 +849,12 @@ async function loadGrantAgencies() {
   } catch { sel.innerHTML = '<option value="">All agencies</option>'; }
 }
 let gState = null;
+/** The search a form describes, in the shape /api/grants/search and saved grant searches use. */
+const grantBody = (f) => ({ keyword: f.keyword || "", agencies: f.agency || "", cfda: f.cfda || "", oppStatuses: (f.status || "").replace(/,/g, "|"), eligibilities: f.eligibilities || "", fundingInstruments: f.fundingInstruments || "", fundingCategories: f.fundingCategories || "", dateRange: f.dateRange || "", sortBy: f.sortBy || "" });
+const grantSummary = (p) => [p.keyword && `“${p.keyword}”`, ...["eligibilities", "fundingInstruments", "fundingCategories"].map((k) => { const o = p[k] && $(`#grantForm [name=${k}] option[value="${p[k]}"]`); return o ? o.textContent : ""; }), p.cfda && "listing " + p.cfda, p.dateRange && "posted in last " + p.dateRange + " days"].filter(Boolean).join(" · ") || "All open grants";
 async function grantSearch(start) {
   const f = gState.form, out = $("#grantOut");
-  const r = await fetch("/api/grants/search", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ keyword: f.keyword, agencies: f.agency, cfda: f.cfda, oppStatuses: (f.status || "").replace(/,/g, "|"), eligibilities: f.eligibilities, fundingInstruments: f.fundingInstruments, fundingCategories: f.fundingCategories, dateRange: f.dateRange, sortBy: f.sortBy, start, rows: 50 }) });
+  const r = await fetch("/api/grants/search", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ ...grantBody(f), start, rows: 50 }) });
   if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
   const j = await r.json().catch(() => ({}));
   if (!r.ok) throw new ApiError(j.error || "Grants search failed", "grants");
@@ -860,6 +880,7 @@ function drawGrants() {
   out.innerHTML = `<div class="kpis"><div class="kpi"><b>${total.toLocaleString()}</b><span>matching opportunities</span></div><div class="kpi"><b>${soon}</b><span>of the ${items.length} loaded close within 30 days</span></div></div>
     <div class="panel" style="margin-top:12px"><h2>Who is funding this</h2><p class="muted small" style="margin-top:-6px">Agencies among the ${items.length} loaded.</p><div id="gBars"></div></div>
     <div class="panel" style="margin-top:12px"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Opportunities</h2><span class="row"><button class="btn ghost" id="gFit" type="button">${g0.fit ? "Edit your focus" : "Sort by fit"}</button></span></div>
+      <div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Save this search to be told about new postings<input id="gSaveName" maxlength="80" value="${esc(grantSummary(grantBody(g0.form)).slice(0, 80))}"></label><button class="btn ghost" id="gSave" type="button" style="align-self:end">Save search</button><span id="gSaveMsg" class="muted small" style="align-self:end" aria-live="polite"></span></div>
       <div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Filter these results<input id="gQ" value="${esc(g0.q)}" placeholder="words in the title or number"></label>
       <label style="min-width:180px">Closes<select id="gWithin"><option value="">Any time</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option><option value="90">Within 90 days</option><option value="none">No close date</option></select></label><span id="gMsg" class="muted small" style="align-self:end" aria-live="polite"></span></div>
       <div id="gTable"></div>${items.length < total ? `<p><button class="btn ghost" id="gMore" type="button">Load 50 more</button> <span class="muted small">${items.length.toLocaleString()} of ${total.toLocaleString()} loaded</span></p>` : ""}</div>`;
@@ -881,6 +902,12 @@ function drawGrants() {
     document.querySelectorAll("#gTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openGrant(rows[+tr.dataset.i])));
   };
   draw();
+  $("#gSave").addEventListener("click", async (e) => {
+    const name = $("#gSaveName").value.trim(); if (!name) { $("#gSaveMsg").textContent = "Give it a name first."; return; }
+    e.target.disabled = true; $("#gSaveMsg").textContent = "Saving…";
+    try { await store("POST", "grantsearches", { name, params: grantBody(g0.form) }); $("#gSaveMsg").textContent = "Saved. Find it under Saved searches."; refreshBadge(); }
+    catch (err) { if (err.kind !== "auth") { $("#gSaveMsg").textContent = err.message; e.target.disabled = false; } }
+  });
   $("#gQ").addEventListener("input", (e) => { g0.q = e.target.value; draw(); });
   $("#gWithin").addEventListener("change", (e) => { g0.within = e.target.value; draw(); });
   $("#gMore")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await grantSearch(items.length); drawGrants(); } catch (err) { if (err.kind !== "auth") { e.target.disabled = false; $("#gMsg").textContent = "Could not load more: " + err.message; } } });
@@ -1317,7 +1344,7 @@ async function loadPipeline() {
 const SET_LABEL = { SBA: "Small business", "8A": "8(a)", HZS: "HUBZone", SDVOSBC: "Service-disabled veteran", WOSB: "Women-owned", EDWOSB: "EDWOSB", VSA: "Veteran set-aside", VSS: "Veteran sole source" };
 const summarize = (p) => [p.query && `“${p.query}”`, p.ncode && "NAICS " + p.ncode, p.state && "in " + p.state, p.setAside && p.setAside.map((s) => SET_LABEL[s] || s).join(", ")].filter(Boolean).join(" · ") || "All notices";
 async function refreshBadge() {
-  try { const { searches } = await store("GET", "searches"); const n = searches.reduce((s, x) => s + x.newCount, 0); const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); const g = $("#grpBadge"); g.textContent = n; g.classList.toggle("hidden", !n); } catch {}
+  try { const { searches } = await store("GET", "searches"); let n = searches.reduce((s, x) => s + x.newCount, 0); try { const g = await store("GET", "grantsearches"); n += g.searches.reduce((s, x) => s + x.newCount, 0); } catch {} try { const rc = await store("GET", "recompete?months=18"); const k = rc.items.filter((x) => x.isNew).length; const rb = $("#rcBadge"); rb.textContent = k + " new"; rb.classList.toggle("hidden", !k); } catch {} const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); const g = $("#grpBadge"); g.textContent = n; g.classList.toggle("hidden", !n); } catch {}
 }
 async function loadAlertBar() {
   const bar = $("#alertBar");
@@ -1339,8 +1366,32 @@ async function loadAlertBar() {
     });
   } catch { bar.textContent = ""; }
 }
+async function loadSavedGrants() {
+  const out = $("#savedGrants"); out.innerHTML = loading("Loading…");
+  try {
+    const { searches } = await store("GET", "grantsearches");
+    if (!searches.length) { out.innerHTML = '<div class="state">No saved grant searches. Run a search on the Grants tab and choose Save search.</div>'; return; }
+    out.innerHTML = `<div class="panel"><div class="tablewrap"><table id="savedGTable"><thead><tr><th>Search</th><th class="num">Matches</th><th>Last run</th><th></th></tr></thead><tbody>${searches.map((x) => `<tr data-id="${x.id}"><td><b>${esc(x.name)}</b> ${x.newCount ? `<span class="pill ok">${x.newCount} new</span>` : ""}<br><span class="muted small">${esc(grantSummary(x.params))}</span></td><td class="num">${x.lastTotal ?? ""}</td><td class="muted small">${x.lastRunAt ? esc(new Date(x.lastRunAt).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })) : "not yet"}</td><td><button class="btn ghost op" type="button">Open</button> <button class="linkbtn rn" type="button">Refresh</button> <button class="linkbtn rm" type="button">Remove</button></td></tr>`).join("")}</tbody></table></div></div>`;
+    document.querySelectorAll("#savedGTable tbody tr").forEach((tr) => {
+      const id = tr.dataset.id, x = searches.find((s) => String(s.id) === id);
+      $(".op", tr).addEventListener("click", async (e) => {
+        e.target.disabled = true;
+        try {
+          await loadGrantAgencies();
+          const f = $("#grantForm"), p = x.params;
+          const set = (k, v) => { if (f.elements[k]) f.elements[k].value = v || ""; };
+          set("keyword", p.keyword); set("agency", p.agencies); set("cfda", p.cfda); set("status", (p.oppStatuses || "forecasted|posted").replace(/\|/g, ",")); set("eligibilities", p.eligibilities); set("fundingInstruments", p.fundingInstruments); set("fundingCategories", p.fundingCategories); set("dateRange", p.dateRange); set("sortBy", "openDate|desc");
+          setTab("grants"); f.requestSubmit();
+          if (x.newCount) store("POST", `grantsearches/${id}/seen`).then(refreshBadge).catch(() => {});
+        } catch (err) { if (err.kind !== "auth") { e.target.disabled = false; } }
+      });
+      $(".rn", tr).addEventListener("click", (e) => { e.target.textContent = "Refreshing…"; store("POST", `grantsearches/${id}/run`).then(() => { loadSavedGrants(); refreshBadge(); }).catch(() => loadSavedGrants()); });
+      $(".rm", tr).addEventListener("click", () => store("DELETE", "grantsearches/" + id).then(() => { loadSavedGrants(); refreshBadge(); }));
+    });
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
 async function loadSaved() {
-  loadAlertBar();
+  loadAlertBar(); loadSavedGrants();
   const out = $("#savedOut"); out.innerHTML = loading("Loading…");
   try {
     const { searches } = await store("GET", "searches");
@@ -1362,6 +1413,98 @@ async function loadSaved() {
       $(".rm", tr).addEventListener("click", () => store("DELETE", "searches/" + id).then(() => { loadSaved(); refreshBadge(); }));
     });
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
+
+/* ---------- CALENDAR ---------- */
+$("#calDl").addEventListener("click", async (e) => {
+  e.target.disabled = true; $("#calMsg").textContent = "Preparing…";
+  try {
+    const r = await fetch("/api/calendar.ics", { headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) { showLogin("That token was not accepted."); return; }
+    if (!r.ok) throw new Error("Could not build the calendar (" + r.status + ")");
+    const a = document.createElement("a"); a.href = URL.createObjectURL(await r.blob()); a.download = "bid-deadlines.ics"; document.body.appendChild(a); a.click(); a.remove();
+    $("#calMsg").textContent = "Downloaded. Open it to add the deadlines to your calendar.";
+  } catch (err) { $("#calMsg").textContent = err.message; }
+  e.target.disabled = false;
+});
+async function showCalLink(reset) {
+  const box = $("#calLink"); box.classList.remove("hidden"); box.textContent = "Working…";
+  try {
+    const r = await fetch(reset ? "/api/calendar/key" : "/api/calendar/key?create=1", { method: reset ? "POST" : "GET", headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) { showLogin("That token was not accepted."); return; }
+    const j = await r.json(); if (!r.ok) throw new Error(j.error || "Could not make a link");
+    box.innerHTML = `<label>Calendar subscribe link<input id="calUrl" readonly value="${esc(j.url)}"></label>
+      <div class="row" style="margin-top:8px"><button class="btn ghost" id="calCopy" type="button">Copy link</button><button class="linkbtn" id="calReset" type="button">Make a new link</button><span id="calCopyMsg" class="small muted" aria-live="polite"></span></div>
+      <p class="muted small" style="margin-bottom:0">Add it in Google Calendar (Other calendars, From URL), Apple Calendar or Outlook. It shows the deadlines of pipeline items you are watching or bidding on, and updates every few hours. Anyone with this link can see those titles, so make a new link if it leaks. The old one stops working.</p>`;
+    $("#calCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(j.url); $("#calCopyMsg").textContent = "Copied."; } catch { $("#calUrl").select(); $("#calCopyMsg").textContent = "Press copy on the selected text."; } });
+    $("#calReset").addEventListener("click", () => showCalLink(true));
+  } catch (err) { box.innerHTML = errBox(err); }
+}
+$("#calSub").addEventListener("click", () => showCalLink(false));
+
+/* ---------- RECOMPETE WATCH ---------- */
+let rc = { items: [], watches: [], months: 12, q: "", fit: null };
+async function loadRecompete() {
+  const out = $("#rcOut"); out.innerHTML = loading("Loading…");
+  loadAgencies().then(() => { const l = $("#rcAgencyList"); if (l) l.innerHTML = [...$("#mktAgency").options].filter((o) => o.value).map((o) => `<option value="${esc(o.value)}">`).join(""); }).catch(() => {});
+  try {
+    const d = await store("GET", "recompete?months=18");
+    rc.items = d.items; rc.watches = d.watches; rc.fit = null; drawRecompete();
+    if (d.items.some((x) => x.isNew)) store("POST", "recompete/seen").then(refreshBadge).catch(() => {});
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
+function drawRecompete() {
+  const out = $("#rcOut"), when = (t) => t ? new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "not yet";
+  out.innerHTML = `<div class="panel"><h2>What to watch</h2>
+    <p class="muted small" style="margin-top:-6px">Pick an industry code, an agency, or both. Up to 6.</p>
+    ${rc.watches.length ? `<div id="rcWatches">${rc.watches.map((w) => `<div class="row" style="justify-content:space-between;margin-bottom:6px" data-w="${w.id}"><span><b>${esc(w.name)}</b> <span class="muted small">scanned ${esc(when(w.lastScanAt))}${w.lastCount != null ? ", " + w.lastCount + " found" : ""}, over ${esc(money(w.minValue))}</span></span><span><button class="linkbtn wscan" type="button">Scan now</button> <button class="linkbtn wrm" type="button">Remove</button></span></div>`).join("")}</div>` : ""}
+    <form id="rcForm" class="row" style="align-items:end;margin-top:8px">
+      <label>NAICS code<input name="naics" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="811111"></label>
+      <label style="flex:1;min-width:200px">Agency (optional)<input name="agency" list="rcAgencyList" placeholder="Department of Veterans Affairs"></label><datalist id="rcAgencyList"></datalist>
+      <label>Contracts over<select name="minValue"><option value="100000">$100K</option><option value="500000">$500K</option><option value="1000000">$1M</option><option value="5000000">$5M</option><option value="25000000">$25M</option></select></label>
+      <button class="btn" type="submit" id="rcAdd">Add and scan</button><span id="rcMsg" class="muted small" aria-live="polite"></span></form></div>
+    <div class="panel" style="margin-top:12px"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Ending soon</h2><button class="btn ghost" id="rcFit" type="button">${rc.fit ? "Edit your focus" : "Sort by fit"}</button></div>
+      <div class="row" style="margin-bottom:8px"><label>Ends within<select id="rcMonths"><option value="3">3 months</option><option value="6">6 months</option><option value="12">12 months</option><option value="18">18 months</option></select></label>
+        <label style="flex:1;min-width:200px">Filter<input id="rcQ" value="${esc(rc.q)}" placeholder="incumbent, agency or words in the description"></label><span id="rcCount" class="muted small" style="align-self:end" aria-live="polite"></span></div>
+      <div id="rcTable"></div></div>`;
+  $("#rcMonths").value = String(rc.months);
+  const draw = () => {
+    const q = rc.q.trim().toLowerCase(), limit = Date.now() + rc.months * 30.44 * DAY;
+    let rows = rc.items.filter((x) => new Date(x.endDate).getTime() <= limit && (!q || `${x.incumbent} ${x.description} ${x.agency} ${x.subAgency}`.toLowerCase().includes(q)));
+    if (rc.fit) rows = rows.slice().sort((a, b) => ((rc.fit.get(String(b.id)) || {}).score ?? -1) - ((rc.fit.get(String(a.id)) || {}).score ?? -1));
+    $("#rcCount").textContent = `${rows.length} contract${rows.length === 1 ? "" : "s"}`;
+    $("#rcTable").innerHTML = !rc.watches.length ? '<div class="state">Add what you want to watch above. The first scan takes up to a minute.</div>' : rows.length ? table([
+      ...(rc.fit ? [{ h: "Fit", f: (x) => fitPill(rc.fit.get(String(x.id))) }] : []),
+      { h: "Contract", f: (x) => `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<b>${esc(String(x.description || (x.subAgency || x.agency || "Federal") + " contract").slice(0, 110))}</b><br><span class="muted small">${esc(x.id)}${x.naics ? " · NAICS " + esc(x.naics) : ""}</span>` },
+      { h: "Incumbent", f: (x) => x.incumbent ? `<a href="#" data-vet="${esc(x.incumbent)}">${esc(title(x.incumbent))}</a>` : "" },
+      { h: "Buyer", f: (x) => esc(x.subAgency || x.agency || "") },
+      { h: "Value", num: 1, f: (x) => money(x.amount) },
+      { h: "Ends", f: (x) => `${esc(x.endDate)} <span class="muted small">(${daysUntil(x.endDate)}d)</span>` },
+      { h: "", f: (x) => x.internalId ? `<button class="linkbtn" data-inc="${esc(x.internalId)}">Analyze</button>` : "" },
+    ], rows) : '<div class="state">Nothing ends in that window. Try a longer window, or widen what you watch.</div>';
+    document.querySelectorAll("#rcTable a[data-vet]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openVet(a.dataset.vet); }));
+    document.querySelectorAll("#rcTable [data-inc]").forEach((b) => b.addEventListener("click", () => { openDrawer("Incumbent", '<div id="rcInc"></div>'); analyzeIncumbent($("#rcInc"), b.dataset.inc); }));
+  };
+  draw();
+  $("#rcMonths").addEventListener("change", (e) => { rc.months = +e.target.value; draw(); });
+  $("#rcQ").addEventListener("input", (e) => { rc.q = e.target.value; draw(); });
+  $("#rcForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)); const btn = $("#rcAdd"); btn.disabled = true; $("#rcMsg").textContent = "Scanning USAspending…";
+    try { await store("POST", "recompete", { naics: f.naics, agency: f.agency, minValue: +f.minValue }); loadRecompete(); }
+    catch (err) { if (err.kind !== "auth") { $("#rcMsg").textContent = err.message; btn.disabled = false; } }
+  });
+  document.querySelectorAll("#rcWatches [data-w]").forEach((row) => {
+    const id = row.dataset.w;
+    $(".wscan", row).addEventListener("click", (e) => { e.target.textContent = "Scanning…"; e.target.disabled = true; store("POST", `recompete/${id}/scan`).then(loadRecompete).catch((err) => { if (err.kind !== "auth") { e.target.textContent = err.message; } }); });
+    $(".wrm", row).addEventListener("click", () => store("DELETE", "recompete/" + id).then(loadRecompete).catch(() => {}));
+  });
+  $("#rcFit").addEventListener("click", async (e) => {
+    if (rc.fit) { editFocus(() => { rc.fit = null; drawRecompete(); $("#rcFit").click(); }); return; }
+    const b = e.target; b.disabled = true; $("#rcCount").textContent = "Ranking…";
+    try { const m = await rankByFit(rc.items, (x) => String(x.id), (x) => `${x.description || ""} ${title(x.incumbent)} NAICS ${x.naics || ""} (${x.subAgency || x.agency || ""})`, () => $("#rcFit").click()); if (m) { rc.fit = m; drawRecompete(); } else draw(); }
+    catch (err) { if (err.kind !== "auth") $("#rcCount").textContent = "Could not rank: " + err.message; }
+    b.disabled = false;
+  });
 }
 
 /* ---------- kind-of-work tag cloud ---------- */
@@ -1515,7 +1658,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
