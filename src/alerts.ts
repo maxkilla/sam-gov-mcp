@@ -1,6 +1,7 @@
 // Daily digest: new notices from saved searches, and pipeline deadlines coming up.
 import { runSavedSearch, type RunTool } from "./store.js";
 import { rankTexts } from "./rank.js";
+import { collectLocalNew } from "./local.js";
 
 export interface AlertItem { kind: "new" | "due"; fit?: "strong" | "possible" | "weak"; title: string; agency?: string; due?: string | null; link?: string; group?: string }
 
@@ -73,6 +74,8 @@ export async function sendWebhook(url: string, text: string, items: AlertItem[] 
 export async function runDailyAlerts(db: D1Database, run: RunTool, webhook?: string, profile?: string | null) {
   const fresh = await collectNew(db, run); // always refresh, even with no webhook, so the badge stays current
   if (!webhook) return;
+  const local = await collectLocalNew(db).catch(() => ({ items: [] as AlertItem[], done: async () => {} }));
+  fresh.push(...local.items);
   if (profile && fresh.length) {
     // Put the best matches first and star the strong ones. If ranking fails the digest still goes out in search order.
     try {
@@ -84,4 +87,5 @@ export async function runDailyAlerts(db: D1Database, run: RunTool, webhook?: str
   }
   const items = [...fresh, ...(await collectDue(db))];
   if (items.length) await sendWebhook(webhook, digestText(items), items);
+  await local.done().catch(() => {});
 }

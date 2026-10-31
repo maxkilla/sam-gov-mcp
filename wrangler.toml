@@ -24,9 +24,9 @@ binding = "DB"
 database_name = "sam-gov-mcp-db"
 database_id = "07b30147-4398-4c96-9138-3168a48f3092"
 
-# Daily refresh of saved searches (UTC).
+# 14:00 UTC daily: saved searches, alert digest, cleanup. Every 6 hours: refresh watched State and local portals.
 [triggers]
-crons = ["0 14 * * *"]
+crons = ["0 14 * * *", "30 */6 * * *"]
 
 # Worker Previews (branch builds) use separate, empty resources so they never touch production data.
 # Set MCP_AUTH_TOKEN as a Preview secret if you want to open a preview.
