@@ -491,12 +491,13 @@ async function resolveAgency(samAgency) {
 
 /* ---------- market intel (shared by notice drawer + Market tab) ---------- */
 function intelShell() {
-  const a = nid("i"), b = nid("i"), c = nid("i"), d = nid("i");
-  return { ids: { a, b, c, d }, html: `
+  const a = nid("i"), b = nid("i"), c = nid("i"), d = nid("i"), e = nid("i");
+  return { ids: { a, b, c, d, e }, html: `
     <div class="stack">
       <div class="panel"><h2>Who wins this work</h2><p class="muted small" style="margin-top:-6px">Top recipients by obligated dollars, fiscal ${lastFullFY()}. Select a company to vet it.</p><div id="${a}">${loading("Loading…")}</div></div>
       <div class="panel"><h2>Spending by fiscal year</h2><p class="muted small" style="margin-top:-6px">Completed years only.</p><div id="${b}">${loading("Loading…")}</div></div>
-      <div class="panel"><h2>Contracts ending soon</h2><p class="muted small" style="margin-top:-6px">Likely recompetes in this NAICS.</p><div id="${c}">${loading("Loading…")}</div></div>
+      <div class="panel"><h2>Contracts ending soon</h2><p class="muted small" style="margin-top:-6px">Likely recompetes in this NAICS.</p><div id="${c}">${loading("Loading…")}</div><div id="${d}" aria-live="polite"></div></div>
+      <div class="panel"><h2>Possible teaming partners</h2><p class="muted small" style="margin-top:-6px">Firms with a socioeconomic status that already win this work for this agency.</p><div id="${e}"></div></div>
     </div>` };
 }
 async function runIntel(ids, { agency, naics }) {
@@ -521,10 +522,72 @@ async function runIntel(ids, { agency, naics }) {
         { h: "Value", num: 1, f: (x) => money(x.amount) },
         { h: "Ends", f: (x) => `${esc(x.endDate)} <span class="muted small">(${x.daysUntilExpiry}d)</span>` },
         { h: "Buyer", f: (x) => esc(x.awardingSubAgency || x.awardingAgency || "") },
+        { h: "", f: (x) => x.generatedInternalId ? `<button class="linkbtn" data-inc="${esc(x.generatedInternalId)}">Analyze</button>` : "" },
       ], rows);
       $$("a[data-vet]", h).forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openVet(a.dataset.vet); }));
+      $$("[data-inc]", h).forEach((b) => b.addEventListener("click", () => analyzeIncumbent($("#" + ids.d), b.dataset.inc)));
     }),
+    teamingInit($("#" + ids.e), { agency, naics }),
   ]);
+}
+
+/* ---------- incumbent analysis + teaming partners ---------- */
+const PRESSURE = {
+  single_offer: ["Only one offer last time", "Competition was thin, so a credible bid may face less opposition than usual."],
+  ceiling_nearly_exhausted: ["Most of the ceiling is spent", "The agency may need a new vehicle or a ceiling increase soon."],
+  hard_stop_no_options: ["No option time left", "The contract ends on its end date unless it is re-competed or extended another way."],
+};
+async function analyzeIncumbent(host, gid) {
+  host.innerHTML = '<div style="margin-top:12px">' + loading("Analyzing the incumbent contract…") + "</div>";
+  try {
+    const d = (await api("usas_analyze_incumbent", { generatedInternalId: gid, otherAwardsLimit: 10 })).data, a = d.award || {}, g = d.signals || {}, oc = g.obligatedVsCeiling || {};
+    const pct = oc.pctConsumed == null ? null : Math.round(oc.pctConsumed * 100);
+    const hints = (d.pressureHints || []).map((h) => PRESSURE[h] ? `<p><span class="pill warn">${esc(PRESSURE[h][0])}</span> <span class="small">${esc(PRESSURE[h][1])}</span></p>` : "").join("");
+    const others = d.incumbentOtherAwards || [];
+    host.innerHTML = `<div class="panel" style="margin-top:12px"><h3>Incumbent: <a href="#" id="incVet">${esc(title(a.incumbent || ""))}</a></h3>
+      <dl class="facts">
+        <dt>Contract</dt><dd>${esc(a.awardId || "")} <span class="muted small">${esc(title(String(a.contractAwardType || "").replace(/_/g, " ")))}${a.pscCode ? " · PSC " + esc(a.pscCode) : ""}</span></dd>
+        <dt>Period</dt><dd>${esc(a.startDate || "?")} to ${esc(a.currentEndDate || "?")}${g.daysUntilCurrentEnd != null ? ` <span class="muted small">(${g.daysUntilCurrentEnd} days left)</span>` : ""}</dd>
+        <dt>Options</dt><dd>${g.extendableDays > 0 ? `Can run up to ${g.extendableDays} more days` : "No option time left"}</dd>
+        <dt>Money spent</dt><dd>${money(oc.obligated)} of ${money(oc.baseAndAllOptions)}${pct != null ? ` (${pct}%)` : ""}</dd>
+        <dt>Changes</dt><dd>${g.modCount ?? "n/a"}${g.modCountAtLeast ? " or more" : ""} modifications</dd>
+        <dt>Competition</dt><dd>${esc(title(g.extentCompetedDescription || "n/a"))}${g.numberOfOffers != null ? `, ${g.numberOfOffers} offer${g.numberOfOffers === 1 ? "" : "s"}` : ""}</dd>
+        <dt>Set-aside</dt><dd>${esc(title(g.setAsideDescription || "none"))}</dd>
+        ${g.vehicle?.parentIdvPiid ? `<dt>Vehicle</dt><dd>Orders under ${esc(g.vehicle.parentIdvPiid)}</dd>` : ""}
+      </dl>${hints}
+      ${others.length ? `<h3 style="margin-top:10px">Their other awards at this agency and NAICS</h3><div id="incOthers"></div>` : '<p class="muted small">No other awards at this agency and NAICS were found for this firm.</p>'}
+      <p class="muted small" style="margin-top:8px">Public signals only. This does not include past performance ratings, protests or the agency's option plans.</p></div>`;
+    $("#incVet", host).addEventListener("click", (e) => { e.preventDefault(); openVet(a.incumbent); });
+    if (others.length) $("#incOthers", host).innerHTML = table([
+      { h: "Award", f: (x) => `${esc(x.awardId)}<br><span class="muted small">${esc(x.description || "")}</span>` },
+      { h: "Value", num: 1, f: (x) => money(x.amount) },
+      { h: "State", f: (x) => esc(x.placeOfPerformanceState || "") },
+    ], others);
+    host.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  } catch (e) { if (e.kind !== "auth") host.innerHTML = errBox(e); }
+}
+const CERTS = { small_business: "Small business", "8a_program_participant": "8(a)", service_disabled_veteran_owned_business: "Service-disabled veteran-owned", veteran_owned_business: "Veteran-owned", women_owned_small_business: "Women-owned small business", economically_disadvantaged_women_owned_small_business: "Economically disadvantaged women-owned", woman_owned_business: "Woman-owned", historically_underutilized_business_firm: "HUBZone" };
+function teamingInit(host, { agency, naics }) {
+  if (!host) return;
+  if (!agency && !naics) { host.innerHTML = '<p class="muted">Needs a NAICS code or a matched agency.</p>'; return; }
+  host.innerHTML = `<div class="row"><label>Status<select class="tmCert">${Object.entries(CERTS).map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join("")}</select></label><button class="btn ghost tmGo" type="button" style="align-self:end">Find partners</button></div><div class="tmOut" style="margin-top:10px" aria-live="polite"></div>`;
+  $(".tmGo", host).addEventListener("click", async (e) => {
+    const out = $(".tmOut", host), btn = e.target; btn.disabled = true; out.innerHTML = loading("Searching award history. This can take up to 30 seconds…");
+    try {
+      const r = (await api("usas_search_teaming_partners", clean({ cert: $(".tmCert", host).value, agency, naics, limit: 15 }))).data;
+      const rows = (r.candidates || []).filter((x) => !x.excluded);
+      if (!rows.length) { out.innerHTML = '<div class="state">No firms with that status found for this agency and NAICS in the last 3 years. Try another status.</div>'; return; }
+      out.innerHTML = '<div id="tmTbl"></div><p class="muted small" style="margin-top:8px">Status comes from each firm\'s federal awards, not the SBA registry of record, so confirm it in SAM before you team. Firms with an active exclusion are removed.</p>';
+      $("#tmTbl", out).innerHTML = table([
+        { h: "Company", f: (x) => `<a href="#" data-vet="${esc(x.recipientName)}">${esc(title(x.recipientName))}</a>` },
+        { h: "Awards here", num: 1, f: (x) => x.agencyAwardCount },
+        { h: "Obligated", num: 1, f: (x) => money(x.agencyObligated) },
+        { h: "Latest award", f: (x) => esc(x.mostRecentAwardDate || "") },
+      ], rows);
+      $$("a[data-vet]", out).forEach((a) => a.addEventListener("click", (ev) => { ev.preventDefault(); openVet(a.dataset.vet); }));
+    } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+    finally { btn.disabled = false; }
+  });
 }
 
 /* ---------- notice drawer ---------- */
