@@ -1054,9 +1054,16 @@ $("#slState").innerHTML = '<option value="">Choose a state</option>' + $("#bidFo
 let slFresh = false;
 let slRun = { id: 0, stop: false, items: [], checked: 0, total: 0, withBids: 0, failed: 0 };
 const slDate = (s) => { const t = Date.parse(s || ""); return isNaN(t) ? null : new Date(t).toISOString(); };
+const SL_DB_TTL = 12 * 60 * 60 * 1000;
+/** Flag solicitations first seen after you last looked at this state. The first scan of a state is a baseline, so nothing is new. */
+function slMarkNew(run, items, since, baselined, firstSeen) {
+  const cutoff = since ? Date.parse(since) : null;
+  items.forEach((x) => { const fs = Date.parse((firstSeen && firstSeen[x.id]) || x.firstSeen || ""); x.isNew = !!(baselined && cutoff && fs > cutoff); });
+  run.newCount = items.filter((x) => x.isNew).length;
+}
 const SL_TTL = 60 * 60 * 1000;
 function slCacheGet(state) { try { const v = JSON.parse(localStorage.getItem("bd_sl_" + state) || "null"); return v && Date.now() - v.t < SL_TTL ? v : null; } catch { return null; } }
-function slCachePut(state, r) { try { localStorage.setItem("bd_sl_" + state, JSON.stringify({ t: Date.now(), items: r.items, checked: r.checked, total: r.total, withBids: r.withBids, failed: r.failed })); } catch {} }
+function slCachePut(state, r) { try { localStorage.setItem("bd_sl_" + state, JSON.stringify({ t: Date.now(), items: r.items, checked: r.checked, total: r.total, withBids: r.withBids, failed: r.failed, watched: r.watched })); } catch {} }
 function slCacheDrop(state) { try { localStorage.removeItem("bd_sl_" + state); } catch {} }
 $("#slForm").addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -1067,7 +1074,7 @@ $("#slForm").addEventListener("submit", async (e) => {
   // A whole-state scan makes hundreds of calls, so keep the last one for an hour. The keyword filter runs on the saved results.
   const hit = slCacheGet(f.state);
   if (hit) {
-    Object.assign(run, { items: hit.items, checked: hit.checked, total: hit.total, withBids: hit.withBids, failed: hit.failed });
+    Object.assign(run, { items: hit.items, checked: hit.checked, total: hit.total, withBids: hit.withBids, failed: hit.failed, watched: hit.watched, newCount: hit.items.filter((x) => x.isNew).length });
     const mins = Math.max(1, Math.round((Date.now() - hit.t) / 60000));
     out.innerHTML = `<div id="slProg" class="row small muted">Showing the scan from ${mins} minute${mins === 1 ? "" : "s"} ago. <button class="linkbtn" id="slAgain" type="button">Check all portals again</button></div><div id="slRes"></div>`;
     $("#slAgain").addEventListener("click", () => { slCacheDrop(f.state); slFresh = true; $("#slForm").requestSubmit(); });
@@ -1075,6 +1082,18 @@ $("#slForm").addEventListener("submit", async (e) => {
   }
   btn.disabled = true; out.innerHTML = loading("Finding procurement portals in " + f.state + "…");
   try {
+    if (!fresh) {
+      // The background refresh keeps watched states current, so a recent saved scan can answer without touching any portal.
+      const info = await store("GET", "local?state=" + f.state).catch((err) => { if (err.kind === "auth") throw err; return null; });
+      if (info && info.lastScanAt && Date.now() - Date.parse(info.lastScanAt) < SL_DB_TTL && info.items.length) {
+        Object.assign(run, { items: info.items, checked: info.portalsTotal || 0, total: info.portalsTotal || 0, withBids: new Set(info.items.map((x) => x.gov)).size, failed: 0, watched: info.watched });
+        slMarkNew(run, info.items, info.lastViewed, info.baselined);
+        const mins = Math.max(1, Math.round((Date.now() - Date.parse(info.lastScanAt)) / 60000));
+        out.innerHTML = `<div id="slProg" class="row small muted">Saved scan from ${mins < 90 ? mins + " minutes" : Math.round(mins / 60) + " hours"} ago. <button class="linkbtn" id="slAgain" type="button">Check all portals now</button></div><div id="slRes"></div>`;
+        $("#slAgain").addEventListener("click", () => { slCacheDrop(f.state); slFresh = true; $("#slForm").requestSubmit(); });
+        drawLocal(run); store("POST", "local/seen", { state: f.state }).catch(() => {}); return;
+      }
+    }
     const [bon, og] = await Promise.all([
       api("bonfire_list_organizations", { state: f.state, limit: 200 }).then((r) => r.data.organizations || []),
       api("opengov_list_governments", { state: f.state, limit: 200 }).then((r) => r.data.governments || []),
@@ -1105,7 +1124,15 @@ $("#slForm").addEventListener("submit", async (e) => {
     await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
     if (run.id !== slRun.id) return;
     $("#slProg").innerHTML = run.stop ? `<span class="muted">Stopped after ${run.checked} of ${run.total} portals.</span>` : "";
-    if (!run.stop) slCachePut(f.state, run);
+    if (!run.stop) {
+      // Save what was found so repeat searches, other devices and the morning digest can use it.
+      try {
+        const r = await store("POST", "local", { state: f.state, complete: true, total: run.total, items: run.items.map(({ id, src, gov, title, number, text, type, due, released, link }) => ({ id, src, gov, title, number, text, type, due, released, link })) });
+        run.watched = r.watched; slMarkNew(run, run.items, r.since, true, r.firstSeen);
+        store("POST", "local/seen", { state: f.state }).catch(() => {});
+      } catch (err) { if (err.kind === "auth") throw err; }
+      slCachePut(f.state, run);
+    }
     drawLocal(run);
   } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }
@@ -1113,7 +1140,7 @@ $("#slForm").addEventListener("submit", async (e) => {
 function drawLocal(run) {
   const host = $("#slRes"); if (!host) return;
   const govs = [...new Set(run.items.map((x) => x.gov))].sort();
-  host.innerHTML = `<div class="kpis"><div class="kpi"><b>${run.items.length}</b><span>open solicitations</span></div><div class="kpi"><b>${run.withBids}</b><span>of ${run.checked} portals have open bids</span></div>${run.failed ? `<div class="kpi"><b>${run.failed}</b><span>portals did not respond</span></div>` : ""}</div>
+  host.innerHTML = `<div id="slWatch" class="row small" style="margin-bottom:8px"></div><div class="kpis"><div class="kpi"><b>${run.items.length}</b><span>open solicitations</span></div>${run.newCount ? `<div class="kpi"><b>${run.newCount}</b><span>new since you last looked</span></div>` : ""}<div class="kpi"><b>${run.withBids}</b><span>of ${run.checked} portals have open bids</span></div>${run.failed ? `<div class="kpi"><b>${run.failed}</b><span>portals did not respond</span></div>` : ""}</div>
     <div class="panel" style="margin-top:12px"><div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Filter results<input id="slFilter" value="${esc(run.kw)}" placeholder="roofing, janitorial, IT services"></label>
       <label style="min-width:240px">Government<select id="slGov"><option value="">All governments</option>${govs.map((g) => `<option value="${esc(g)}">${esc(g)} (${run.items.filter((x) => x.gov === g).length})</option>`).join("")}</select></label><span id="slMsg" class="small muted" style="align-self:end" aria-live="polite"></span></div><div id="slTbl"></div>
       <p class="muted small" style="margin-top:8px">Covers governments that post on Bonfire and OpenGov Procurement. Agencies that use other sites will not appear.</p></div>`;
@@ -1121,7 +1148,7 @@ function drawLocal(run) {
     const q = $("#slFilter").value.trim().toLowerCase(), g = $("#slGov").value;
     const rows = run.items.filter((x) => (!g || x.gov === g) && (!q || (x.title + " " + x.number + " " + x.text + " " + x.gov).toLowerCase().includes(q))).sort((a, b) => (a.due ? new Date(a.due).getTime() : 9e15) - (b.due ? new Date(b.due).getTime() : 9e15));
     $("#slTbl").innerHTML = rows.length ? table([
-      { h: "Solicitation", f: (x) => `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.number)}${x.type ? " · " + esc(x.type) : ""}</span>` },
+      { h: "Solicitation", f: (x) => `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.number)}${x.type ? " · " + esc(x.type) : ""}</span>` },
       { h: "Government", f: (x) => `${esc(x.gov)}<br><span class="pill">${esc(x.src)}</span>` },
       { h: "Closes", f: (x) => x.due ? dueLabel(x.due) : '<span class="muted">see portal</span>' },
       { h: "", f: (x) => `<button class="linkbtn" data-track="${esc(x.id)}">Track</button>` },
@@ -1134,6 +1161,15 @@ function drawLocal(run) {
     $("#slMsg").textContent = $("#slMsg").textContent.startsWith("Added") ? $("#slMsg").textContent : `${rows.length} shown`;
   };
   $("#slFilter").addEventListener("input", draw); $("#slGov").addEventListener("change", draw); draw();
+  const watch = () => {
+    const w = $("#slWatch"); if (!w) return;
+    w.innerHTML = run.watched
+      ? `Watching ${esc(run.state)}. These portals are rechecked through the day and new bids go in your morning digest. <button class="linkbtn" id="slUnwatch" type="button">Stop watching</button>`
+      : `<button class="btn ghost" id="slWatchBtn" type="button">Watch ${esc(run.state)}</button><span class="muted">Recheck these portals through the day and include new bids in your morning digest.</span>`;
+    const flip = async (on) => { try { await store("PUT", "local/watch", { state: run.state, watched: on }); run.watched = on; watch(); } catch (err) { if (err.kind !== "auth") w.textContent = "Could not save: " + err.message; } };
+    $("#slWatchBtn")?.addEventListener("click", () => flip(true)); $("#slUnwatch")?.addEventListener("click", () => flip(false));
+  };
+  watch();
 }
 
 /* ---------- MARKET tab ---------- */

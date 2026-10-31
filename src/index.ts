@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import APP_HTML from "./app.html";
 import { handleStore } from "./store.js";
+import { refreshWatched, purgeLocal } from "./local.js";
 import { rankTexts } from "./rank.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -263,6 +264,7 @@ interface Env {
   ALERT_WEBHOOK_URL?: string;
 }
 
+const DAILY_CRON = "0 14 * * *"; // keep in step with wrangler.toml
 const DATA_MAP_URI = "samgov://data-map/state-local";
 
 function json(body: unknown, status = 200): Response {
@@ -599,10 +601,17 @@ export default {
     relayCfg = env.GOV_RELAY_URL && env.RELAY_TOKEN ? { base: env.GOV_RELAY_URL.replace(/\/$/, ""), token: env.RELAY_TOKEN } : undefined;
     const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
     const cache = cacheFor(env, ctx);
-    // Nightly cleanup of expired cache rows (reads already ignore them).
+    const run = async (name: string, args: Record<string, unknown>) => (await runEnvelope(sam, name, args, cache)).envelope;
+    if (_event.cron !== DAILY_CRON) {
+      // Every few hours: work through the watched states' portals a slice at a time.
+      ctx.waitUntil(refreshWatched(env.DB, run));
+      return;
+    }
+    // Daily: clean up expired rows, refresh saved searches and send the digest.
     ctx.waitUntil(env.DB.prepare("DELETE FROM http_cache WHERE expires_at < ?1").bind(Date.now()).run().catch(() => {}));
+    ctx.waitUntil(purgeLocal(env.DB).catch(() => {}));
     ctx.waitUntil(
-      runDailyAlerts(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope, env.ALERT_WEBHOOK_URL?.trim() || undefined, env.CACHE ? await env.CACHE.get("settings:profile") : null),
+      runDailyAlerts(env.DB, run, env.ALERT_WEBHOOK_URL?.trim() || undefined, env.CACHE ? await env.CACHE.get("settings:profile") : null),
     );
   },
 };

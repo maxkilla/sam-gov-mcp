@@ -1,4 +1,5 @@
 // Saved searches, pipeline and vetting history, stored in D1.
+import { ensureState, upsertRows, listRows, stateInfo, markScanned } from "./local.js";
 
 export type RunTool = (name: string, args: Record<string, unknown>) => Promise<any>;
 
@@ -89,6 +90,38 @@ export async function handleStore(req: Request, url: URL, db: D1Database | undef
     if (m === "POST" && action === "run") {
       const r = await runSavedSearch(db, id, run);
       return r ? json(r) : json({ error: "not found" }, 404);
+    }
+  }
+
+  if (kind === "local") {
+    const stateOf = (v: unknown) => { const st = String(v || "").toUpperCase(); return /^[A-Z]{2}$/.test(st) ? st : null; };
+    if (!idPart && m === "GET") {
+      const st = stateOf(url.searchParams.get("state"));
+      if (!st) return json({ error: "state is required" }, 400);
+      return json({ ...(await stateInfo(db, st)), items: await listRows(db, st) });
+    }
+    if (!idPart && m === "POST") {
+      // The dashboard sends what a scan found. The reply says when each row was first seen so new ones can be flagged.
+      const b = await body();
+      const st = stateOf(b.state);
+      if (!st || !Array.isArray(b.items)) return json({ error: "state and items are required" }, 400);
+      const before = await stateInfo(db, st);
+      await upsertRows(db, st, b.items);
+      if (b.complete) await markScanned(db, st, Number.isInteger(b.total) ? b.total : null);
+      const rows = await listRows(db, st);
+      return json({ watched: before.watched, since: before.baselined ? before.lastViewed : null, firstSeen: Object.fromEntries(rows.map((r) => [r.id, r.firstSeen])) });
+    }
+    if (idPart === "seen" && m === "POST") {
+      const st = stateOf((await body()).state); if (!st) return json({ error: "bad state" }, 400);
+      await ensureState(db, st);
+      await db.prepare("UPDATE local_states SET last_viewed=?2 WHERE state=?1").bind(st, now()).run();
+      return json({ ok: true });
+    }
+    if (idPart === "watch" && m === "PUT") {
+      const b = await body(); const st = stateOf(b.state); if (!st) return json({ error: "bad state" }, 400);
+      await ensureState(db, st);
+      await db.prepare("UPDATE local_states SET watched=?2 WHERE state=?1").bind(st, b.watched ? 1 : 0).run();
+      return json({ ok: true });
     }
   }
 
