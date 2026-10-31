@@ -1,7 +1,8 @@
 // Daily digest: new notices from saved searches, and pipeline deadlines coming up.
 import { runSavedSearch, type RunTool } from "./store.js";
+import { rankTexts } from "./rank.js";
 
-export interface AlertItem { kind: "new" | "due"; title: string; agency?: string; due?: string | null; link?: string; group?: string }
+export interface AlertItem { kind: "new" | "due"; fit?: "strong" | "possible" | "weak"; title: string; agency?: string; due?: string | null; link?: string; group?: string }
 
 const DAY = 86_400_000;
 
@@ -40,7 +41,7 @@ export function digestText(items: AlertItem[]): string {
   const due = items.filter((i) => i.kind === "due");
   if (fresh.length) {
     lines.push(`${fresh.length} new notice${fresh.length === 1 ? "" : "s"}`);
-    for (const i of fresh.slice(0, 25)) lines.push(`• ${i.title} (${i.agency || "agency n/a"}, due ${day(i.due)}) [${i.group}]${i.link ? "\n  " + i.link : ""}`);
+    for (const i of fresh.slice(0, 25)) lines.push(`• ${i.fit === "strong" ? "★ " : ""}${i.title} (${i.agency || "agency n/a"}, due ${day(i.due)}) [${i.group}]${i.link ? "\n  " + i.link : ""}`);
     if (fresh.length > 25) lines.push(`…and ${fresh.length - 25} more in the dashboard`);
   }
   if (due.length) {
@@ -69,9 +70,18 @@ export async function sendWebhook(url: string, text: string, items: AlertItem[] 
   }
 }
 
-export async function runDailyAlerts(db: D1Database, run: RunTool, webhook?: string) {
+export async function runDailyAlerts(db: D1Database, run: RunTool, webhook?: string, profile?: string | null) {
   const fresh = await collectNew(db, run); // always refresh, even with no webhook, so the badge stays current
   if (!webhook) return;
+  if (profile && fresh.length) {
+    // Put the best matches first and star the strong ones. If ranking fails the digest still goes out in search order.
+    try {
+      const r = await rankTexts(fresh.map((i) => `${i.title} (${i.agency || ""})`), profile);
+      fresh.forEach((i, k) => (i.fit = r[k].fit));
+      const score = new Map(fresh.map((i, k) => [i, r[k].score]));
+      fresh.sort((a, b) => (score.get(b) || 0) - (score.get(a) || 0));
+    } catch {}
+  }
   const items = [...fresh, ...(await collectDue(db))];
   if (items.length) await sendWebhook(webhook, digestText(items), items);
 }

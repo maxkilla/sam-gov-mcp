@@ -688,7 +688,7 @@ function renderBids() {
     </div>
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
-        <span class="row"><button class="btn ghost" id="saveSearchBtn">Save this search</button><button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></span></div>
+        <span class="row"><button class="btn ghost" id="saveSearchBtn">Save this search</button><button class="btn ghost" id="fitBtn">Sort by fit</button><button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></span></div>
       <form id="saveForm" class="row hidden" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Name for this search<input name="name" required maxlength="80" placeholder="VA cybersecurity, Maryland"></label><button class="btn" type="submit" style="align-self:end">Save</button></form>
       <div class="row" style="margin-bottom:8px"><label style="min-width:260px">Agency<select id="agencyFilter"></select></label><span id="enrichMsg" class="muted small" aria-live="polite" style="align-self:end"></span></div>
       <div id="bidTable"></div>
@@ -709,8 +709,11 @@ function renderBids() {
   sel.addEventListener("change", () => { bidState.agency = sel.value; drawBidTable(); });
   drawBidTable();
   function drawBidTable() {
-  const shown = bidState.agency ? items.filter((i) => dept(i) === bidState.agency) : items;
+  let shown = bidState.agency ? items.filter((i) => dept(i) === bidState.agency) : items;
+  const fit = bidState.fit;
+  if (fit) shown = shown.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
   $("#bidTable").innerHTML = table([
+    ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(x.noticeId)) }] : []),
     { h: "Notice", f: (x) => `${bidState.newIds.has(x.noticeId) ? '<span class="pill ok">New</span> ' : ""}<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
     { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
     { h: "NAICS", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).naics || x.naics || "") },
@@ -721,6 +724,15 @@ function renderBids() {
   }
   $("#moreBtn")?.addEventListener("click", (e) => { e.target.disabled = true; searchBids(items.length); });
   $("#enrichBtn").addEventListener("click", enrich);
+  $("#fitBtn").addEventListener("click", async (e) => {
+    const b = e.target; b.disabled = true; $("#enrichMsg").textContent = "Ranking…";
+    try {
+      const m = await rankByFit(bidState.items, (x) => x.noticeId, noticeText, () => $("#fitBtn").click());
+      if (m) { bidState.fit = m; drawBidTable(); $("#enrichMsg").innerHTML = 'Sorted best fit first. <button class="linkbtn" id="editFocus" type="button">Edit your focus</button>'; $("#editFocus").addEventListener("click", () => editFocus(() => $("#fitBtn").click())); }
+      else $("#enrichMsg").textContent = "";
+    } catch (err) { if (err.kind !== "auth") $("#enrichMsg").textContent = "Could not rank: " + err.message; }
+    b.disabled = false;
+  });
   $("#saveSearchBtn").addEventListener("click", () => { $("#saveForm").classList.toggle("hidden"); $("#saveForm input").focus(); });
   $("#saveForm").addEventListener("submit", async (e) => {
     e.preventDefault(); const name = new FormData(e.target).get("name");
@@ -1204,9 +1216,68 @@ async function loadSaved() {
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
 }
 
+/* ---------- fit ranking ---------- */
+let FOCUS = null;
+async function loadFocus() {
+  if (FOCUS !== null) return FOCUS;
+  const r = await fetch("/api/profile", { headers: { authorization: "Bearer " + TOKEN } });
+  if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+  FOCUS = ((await r.json().catch(() => ({}))).profile || "").trim();
+  return FOCUS;
+}
+function editFocus(after) {
+  openDrawer("Your focus", `<h1>Your focus</h1>
+    <p class="muted">Describe what your company does and what you want to win. Notices are ranked against this. Only the notice title and agency are sent for ranking.</p>
+    <form id="focusForm" class="stack"><label>What we do and want to win<textarea name="p" rows="7" maxlength="1500" required placeholder="Small California business. Automotive repair and parts, AI and computer consulting, security testing. Want fleet maintenance, diagnostic equipment, IT support and penetration testing work.">${esc(FOCUS || "")}</textarea></label>
+    <div class="row"><button class="btn" type="submit">Save and rank</button><span id="focusMsg" class="small muted" aria-live="polite"></span></div></form>`);
+  $("#focusForm").addEventListener("submit", async (e) => {
+    e.preventDefault(); const v = new FormData(e.target).get("p").trim(); $("#focusMsg").textContent = "Saving…";
+    try {
+      const r = await fetch("/api/profile", { method: "PUT", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ profile: v }) });
+      if (!r.ok) throw new Error("Could not save");
+      FOCUS = v; closeDrawer(); if (after) after();
+    } catch (err) { $("#focusMsg").textContent = err.message; }
+  });
+}
+/** Rank rows by fit. Returns Map(id -> {score, fit}); opens the focus editor first if none is saved. */
+async function rankByFit(rows, idOf, textOf, redo) {
+  const focus = await loadFocus();
+  if (!focus) { editFocus(redo); return null; }
+  const r = await fetch("/api/rank", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ items: rows.map((x) => ({ id: idOf(x), text: textOf(x) })) }) });
+  if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(j.error || "Ranking failed", "rank");
+  return new Map(j.results.map((x) => [x.id, x]));
+}
+const fitPill = (f) => !f ? "" : f.fit === "strong" ? '<span class="pill ok">Strong fit</span>' : f.fit === "possible" ? '<span class="pill">Possible</span>' : '<span class="muted small">Weak</span>';
+const noticeText = (x) => `${x.title} (${String(x.agency || "").split(".")[0]})`;
+
 /* ---------- EARLY NOTICES ---------- */
 $("#earlyState").innerHTML = '<option value="">Anywhere</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
 const EARLY_LABEL = { r: "Sources sought", p: "Presolicitation", s: "Special notice" };
+function drawEarly(rows, total, fit) {
+  const out = $("#earlyOut");
+  if (fit) rows = rows.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
+  out.innerHTML = `<div class="row" style="margin-bottom:8px"><span class="muted small">Showing ${rows.length}${total > rows.length ? " of " + total : ""}. ${fit ? "Best fit first." : "Sources sought come first, then presolicitations."} Select a row for details.</span> <button class="btn ghost" id="earlyFit" type="button">${fit ? "Edit your focus" : "Sort by fit"}</button> <span id="earlyMsg" class="small muted" aria-live="polite"></span></div><div class="panel" id="earlyTbl"></div>`;
+  $("#earlyTbl").innerHTML = table([
+    ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(x.noticeId)) }] : []),
+    { h: "Type", f: (x) => `<span class="pill${x.noticeTypeCode === "r" ? " ok" : ""}">${esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "")}</span>` },
+    { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
+    { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
+    { h: "Posted", f: (x) => esc(String(x.postedDate || "").slice(0, 10)) },
+    { h: "Respond by", f: (x) => x.responseDeadline ? dueLabel(x.responseDeadline) : '<span class="muted">no date</span>' },
+  ], rows, { onRow: 1 });
+  $$("#earlyTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(rows[+tr.dataset.i])));
+  $("#earlyFit").addEventListener("click", async (e) => {
+    if (fit) { editFocus(() => drawEarly(rows, total, null) || $("#earlyFit").click()); return; }
+    const b = e.target; b.disabled = true; $("#earlyMsg").textContent = "Ranking…";
+    try {
+      const m = await rankByFit(rows, (x) => x.noticeId, noticeText, () => $("#earlyFit").click());
+      if (m) drawEarly(rows, total, m); else $("#earlyMsg").textContent = "";
+    } catch (err) { if (err.kind !== "auth") $("#earlyMsg").textContent = "Could not rank: " + err.message; }
+    b.disabled = false;
+  });
+}
 $("#earlyForm").addEventListener("submit", async (e) => {
   e.preventDefault(); const out = $("#earlyOut"), btn = $("#earlyGo"), fd = new FormData(e.target);
   const types = fd.getAll("t");
@@ -1217,15 +1288,7 @@ $("#earlyForm").addEventListener("submit", async (e) => {
     const rank = { r: 0, p: 1, s: 2 };
     const rows = (r.notices || []).slice().sort((a, b) => (rank[a.noticeTypeCode] ?? 9) - (rank[b.noticeTypeCode] ?? 9) || (Date.parse(a.responseDeadline) || 9e15) - (Date.parse(b.responseDeadline) || 9e15));
     if (!rows.length) { out.innerHTML = '<div class="state">No early notices match. Try fewer filters or another keyword.</div>'; return; }
-    out.innerHTML = `<p class="muted small">Showing ${rows.length}${r.totalRecords > rows.length ? " of " + r.totalRecords : ""}. Sources sought come first, then presolicitations. Select a row for details.</p><div class="panel" id="earlyTbl"></div>`;
-    $("#earlyTbl").innerHTML = table([
-      { h: "Type", f: (x) => `<span class="pill${x.noticeTypeCode === "r" ? " ok" : ""}">${esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "")}</span>` },
-      { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
-      { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
-      { h: "Posted", f: (x) => esc(String(x.postedDate || "").slice(0, 10)) },
-      { h: "Respond by", f: (x) => x.responseDeadline ? dueLabel(x.responseDeadline) : '<span class="muted">no date</span>' },
-    ], rows, { onRow: 1 });
-    $$("#earlyTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(rows[+tr.dataset.i])));
+    drawEarly(rows, r.totalRecords, null);
   } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }
 });
