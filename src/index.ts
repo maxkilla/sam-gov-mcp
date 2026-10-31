@@ -110,9 +110,15 @@ async function rawFetch(input: any, init?: any): Promise<Response> {
 // schema errors are never cached and still surface as errors. Keys are SHA-256
 // hashes, so API keys that ride in URLs/bodies are never stored. Per-tool-call
 // stats are carried in AsyncLocalStorage and reported in the result's _meta.cache.
-interface CacheStore {
-  kv: KVNamespace;
+interface CacheCfg {
+  /** Preferred: D1 table http_cache (large free write quota). Falls back to KV when unset. */
+  db?: D1Database;
+  kv?: KVNamespace;
   ctx: ExecutionContext;
+  /** Skip cache reads for this call (still stores the fresh answer). */
+  refresh?: boolean;
+}
+interface CacheStore extends CacheCfg {
   hits: number;
   misses: number;
   oldestAgeSeconds: number;
@@ -127,20 +133,56 @@ interface CachedEntry {
 const cacheALS = new AsyncLocalStorage<CacheStore>();
 
 const LIVE_HOSTS = new Set(["api.weather.gov", "bwt.cbp.gov"]); // never cached
-const REFERENCE_HOSTS = /(^|\.)(ecfr\.gov|federalregister\.gov|acquisition\.gov|nist\.gov|usitc\.gov)$/;
+const MIN = 60, HOUR = 3600, DAY = 86400;
+// How long each kind of data may be reused. Compliance checks stay short; reference data stays long.
+const TTL_RULES: [RegExp, number][] = [
+  [/(^|\.)(ecfr\.gov|acquisition\.gov)$/, DAY], // FAR/DFARS text
+  [/(^|\.)(nist\.gov|usitc\.gov|sba\.gov)$/, 7 * DAY], // controls, tariff schedule, size standards
+  [/(^|\.)(gsa\.gov|census\.gov|bls\.gov|bea\.gov|stlouisfed\.org)$/, DAY], // rates and statistics, updated monthly or yearly
+  [/(^|\.)federalregister\.gov$/, HOUR],
+  [/(^|\.)api\.usaspending\.gov$/, 6 * HOUR], // award history changes slowly
+  [/(^|\.)(bonfirehub\.com|opengov\.com)$/, 30 * MIN], // city and county portals
+  [/(^|\.)grants\.gov$/, 30 * MIN],
+  [/(^|\.)sanctionslistservice\.ofac\.treas\.gov$/, 10 * MIN], // sanctions screening stays fresh
+];
 function ttlSeconds(host: string): number {
   if (LIVE_HOSTS.has(host)) return 0;
-  if (REFERENCE_HOSTS.test(host)) return 3600; // slow-changing reference data
-  if (PORTAL_HOSTS.test(host)) return 1800; // city and county bid portals change slowly, and a state scan makes hundreds of calls
-  return 600; // everything else: 10 minutes
+  for (const [re, ttl] of TTL_RULES) if (re.test(host)) return ttl;
+  return 10 * MIN; // everything else, including SAM.gov notices and exclusion checks
 }
-const PORTAL_HOSTS = /(^|\.)(bonfirehub\.com|opengov\.com)$/;
 const CACHEABLE_TYPE = /json|text|xml|csv/i;
-const MAX_CACHED_CHARS = 1_000_000;
+const MAX_CACHED_CHARS = 700_000; // D1 rows are limited to 2 MB
 
 async function sha256Hex(s: string): Promise<string> {
   const d = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
   return [...new Uint8Array(d)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function cacheRead(store: CacheStore, key: string): Promise<CachedEntry | null> {
+  if (store.db) {
+    const r: any = await store.db
+      .prepare("SELECT body, content_type, final_url, stored_at FROM http_cache WHERE key = ?1 AND expires_at > ?2")
+      .bind(key, Date.now())
+      .first();
+    return r ? { body: r.body, contentType: r.content_type, finalUrl: r.final_url ?? undefined, storedAt: r.stored_at } : null;
+  }
+  return store.kv ? store.kv.get<CachedEntry>(key, "json") : null;
+}
+async function cacheWrite(store: CacheStore, key: string, e: CachedEntry, ttl: number): Promise<void> {
+  if (store.db) {
+    await store.db
+      .prepare("INSERT OR REPLACE INTO http_cache (key, body, content_type, final_url, stored_at, expires_at) VALUES (?1,?2,?3,?4,?5,?6)")
+      .bind(key, e.body, e.contentType, e.finalUrl ?? null, e.storedAt, e.storedAt + ttl * 1000)
+      .run();
+  } else if (store.kv) {
+    await store.kv.put(key, JSON.stringify(e), { expirationTtl: Math.max(60, ttl) });
+  }
+}
+
+/** Build the cache config for a request, or undefined when caching is off or nothing is bound. */
+function cacheFor(env: Env, ctx: ExecutionContext, opts: { off?: boolean; refresh?: boolean } = {}): CacheCfg | undefined {
+  if (opts.off || (!env.DB && !env.CACHE)) return undefined;
+  return { db: env.DB, kv: env.CACHE, ctx, refresh: opts.refresh };
 }
 
 globalThis.fetch = (async (input: any, init?: any) => {
@@ -162,9 +204,9 @@ globalThis.fetch = (async (input: any, init?: any) => {
   const ttl = ttlSeconds(host);
   if (ttl === 0) return rawFetch(input, init);
 
-  const key = "v2:" + (await sha256Hex(`${method} ${url} ${body ?? ""}`));
+  const key = "v3:" + (await sha256Hex(`${method} ${url} ${body ?? ""}`));
   try {
-    const hit = await store.kv.get<CachedEntry>(key, "json");
+    const hit = store.refresh ? null : await cacheRead(store, key);
     if (hit && typeof hit.body === "string") {
       store.hits++;
       store.oldestAgeSeconds = Math.max(
@@ -180,7 +222,7 @@ globalThis.fetch = (async (input: any, init?: any) => {
       return cached;
     }
   } catch {
-    // KV read failed: fall through to a live fetch.
+    // Cache read failed: fall through to a live fetch.
   }
 
   const res = await rawFetch(input, init);
@@ -195,10 +237,8 @@ globalThis.fetch = (async (input: any, init?: any) => {
           storedAt: Date.now(),
           finalUrl: res.url || url,
         };
-        // Best-effort write (e.g. the free plan's daily KV write cap can reject it).
-        store.ctx.waitUntil(
-          store.kv.put(key, JSON.stringify(entry), { expirationTtl: ttl }).catch(() => {}),
-        );
+        // Best-effort write: a failed write only means the next call goes upstream.
+        store.ctx.waitUntil(cacheWrite(store, key, entry, ttl).catch(() => {}));
       }
     } catch {
       // Could not read the body for caching: ignore, the caller still has the response.
@@ -255,7 +295,7 @@ async function runEnvelope(
   sam: any,
   name: string,
   args: unknown,
-  cacheCfg: { kv: KVNamespace; ctx: ExecutionContext } | undefined,
+  cacheCfg: CacheCfg | undefined,
 ): Promise<{ envelope: Record<string, unknown>; isError: boolean }> {
   const store: CacheStore | undefined = cacheCfg
     ? { ...cacheCfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }
@@ -275,7 +315,7 @@ async function runEnvelope(
               ...(store.hits > 0
                 ? {
                     oldestCachedAgeSeconds: store.oldestAgeSeconds,
-                    note: "Some upstream data came from a short-lived cache (10-60 min depending on source). Add ?cache=off to the MCP URL for live data.",
+                    note: "Some upstream data came from a cache (10 minutes for notices and exclusion checks, up to a week for reference data). Add ?cache=off to the MCP URL for live data.",
                   }
                 : {}),
             },
@@ -292,7 +332,7 @@ async function runEnvelope(
 function buildServer(
   env: Env,
   toolsetParam: string | null,
-  cacheCfg: { kv: KVNamespace; ctx: ExecutionContext } | undefined,
+  cacheCfg: CacheCfg | undefined,
 ): Server {
   // Profile precedence: ?toolsets= on the URL, then the Worker default, then all tools.
   const toolsetSpec = toolsetParam ?? env.MCP_SAM_GOV_TOOLSETS;
@@ -476,8 +516,7 @@ export default {
       }
       const name = typeof body?.name === "string" ? body.name : "";
       if (!TOOLS.some((t: any) => t.name === name)) return json({ error: `unknown tool '${name}'` }, 404);
-      const cache =
-        env.CACHE && url.searchParams.get("cache") !== "off" ? { kv: env.CACHE, ctx } : undefined;
+      const cache = cacheFor(env, ctx, { off: url.searchParams.get("cache") === "off", refresh: body?.refresh === true });
       const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
       const { envelope } = await runEnvelope(sam, name, body?.args, cache);
       return json(envelope, 200);
@@ -525,7 +564,7 @@ export default {
     if (url.pathname.startsWith("/api/store")) {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
-      const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
+      const cache = cacheFor(env, ctx);
       return handleStore(req, url, env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope);
     }
 
@@ -544,10 +583,7 @@ export default {
     }
 
     // Stateless: a fresh server + transport per request, no session storage.
-    const cacheCfg =
-      env.CACHE && url.searchParams.get("cache") !== "off"
-        ? { kv: env.CACHE, ctx }
-        : undefined;
+    const cacheCfg = cacheFor(env, ctx, { off: url.searchParams.get("cache") === "off" });
     const server = buildServer(env, url.searchParams.get("toolsets"), cacheCfg);
     const transport = new WebStandardStreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
@@ -562,7 +598,9 @@ export default {
     if (!env.DB) return;
     relayCfg = env.GOV_RELAY_URL && env.RELAY_TOKEN ? { base: env.GOV_RELAY_URL.replace(/\/$/, ""), token: env.RELAY_TOKEN } : undefined;
     const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
-    const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
+    const cache = cacheFor(env, ctx);
+    // Nightly cleanup of expired cache rows (reads already ignore them).
+    ctx.waitUntil(env.DB.prepare("DELETE FROM http_cache WHERE expires_at < ?1").bind(Date.now()).run().catch(() => {}));
     ctx.waitUntil(
       runDailyAlerts(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope, env.ALERT_WEBHOOK_URL?.trim() || undefined, env.CACHE ? await env.CACHE.get("settings:profile") : null),
     );

@@ -382,8 +382,8 @@ const title = (s) => String(s || "").toLowerCase().replace(/\b[a-z]/g, (c) => c.
 let TOKEN = "";
 try { TOKEN = localStorage.getItem("bd_token") || sessionStorage.getItem("bd_token") || ""; } catch {}
 class ApiError extends Error { constructor(m, kind) { super(m); this.kind = kind; } }
-async function api(name, args = {}) {
-  const r = await fetch("/api/tool", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ name, args }) });
+async function api(name, args = {}, opts = {}) {
+  const r = await fetch("/api/tool", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ name, args, refresh: opts.refresh === true }) });
   if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
   const j = await r.json().catch(() => null);
   if (!j) throw new ApiError("The server returned an unreadable response (" + r.status + ").", "bad");
@@ -1051,6 +1051,7 @@ $("#farMatrixForm").addEventListener("submit", (e) => {
 
 /* ---------- STATE & LOCAL tab (Bonfire + OpenGov portals) ---------- */
 $("#slState").innerHTML = '<option value="">Choose a state</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
+let slFresh = false;
 let slRun = { id: 0, stop: false, items: [], checked: 0, total: 0, withBids: 0, failed: 0 };
 const slDate = (s) => { const t = Date.parse(s || ""); return isNaN(t) ? null : new Date(t).toISOString(); };
 const SL_TTL = 60 * 60 * 1000;
@@ -1061,6 +1062,7 @@ $("#slForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   const f = Object.fromEntries(new FormData(e.target)), out = $("#slOut"), btn = $("#slGo");
   if (!f.state) { out.innerHTML = '<div class="state err" role="alert">Choose a state first.</div>'; return; }
+  const fresh = slFresh; slFresh = false;
   const run = slRun = { id: slRun.id + 1, stop: false, items: [], checked: 0, total: 0, withBids: 0, failed: 0, state: f.state, kw: f.keyword.trim() };
   // A whole-state scan makes hundreds of calls, so keep the last one for an hour. The keyword filter runs on the saved results.
   const hit = slCacheGet(f.state);
@@ -1068,7 +1070,7 @@ $("#slForm").addEventListener("submit", async (e) => {
     Object.assign(run, { items: hit.items, checked: hit.checked, total: hit.total, withBids: hit.withBids, failed: hit.failed });
     const mins = Math.max(1, Math.round((Date.now() - hit.t) / 60000));
     out.innerHTML = `<div id="slProg" class="row small muted">Showing the scan from ${mins} minute${mins === 1 ? "" : "s"} ago. <button class="linkbtn" id="slAgain" type="button">Check all portals again</button></div><div id="slRes"></div>`;
-    $("#slAgain").addEventListener("click", () => { slCacheDrop(f.state); $("#slForm").requestSubmit(); });
+    $("#slAgain").addEventListener("click", () => { slCacheDrop(f.state); slFresh = true; $("#slForm").requestSubmit(); });
     drawLocal(run); return;
   }
   btn.disabled = true; out.innerHTML = loading("Finding procurement portals in " + f.state + "…");
@@ -1088,11 +1090,11 @@ $("#slForm").addEventListener("submit", async (e) => {
         const p = portals[next++];
         try {
           if (p.src === "Bonfire") {
-            const r = (await api("bonfire_search_opportunities", { org: p.key, limit: 200 })).data.opportunities || [];
+            const r = (await api("bonfire_search_opportunities", { org: p.key, limit: 200 }, { refresh: fresh })).data.opportunities || [];
             const rows = r.map((x) => ({ src: p.src, gov: p.gov, id: p.key + "-" + (x.referenceNumber || x.name), title: x.name, number: x.referenceNumber || "", text: x.description || "", type: "", due: slDate(x.closeDate), released: slDate(x.pubDate), link: x.link }));
             if (rows.length) run.withBids++; run.items.push(...rows);
           } else {
-            const r = (await api("opengov_search_solicitations", { governmentCode: p.key, limit: 100 })).data.solicitations || [];
+            const r = (await api("opengov_search_solicitations", { governmentCode: p.key, limit: 100 }, { refresh: fresh })).data.solicitations || [];
             const rows = r.filter((x) => x.status === "open").map((x) => ({ src: p.src, gov: p.gov, id: p.key + "-" + x.id, title: x.title, number: x.solicitationNumber || "", text: x.department || "", type: x.type || "", due: x.proposalDeadline || null, released: x.releaseDate || null, link: x.link }));
             if (rows.length) run.withBids++; run.items.push(...rows);
           }
