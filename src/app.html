@@ -48,6 +48,12 @@ nav .menu button{white-space:nowrap}
 nav .menu button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;padding:9px 12px;border:0;border-radius:6px;border-bottom:0;background:none;color:var(--ink);font-weight:500;cursor:pointer}
 nav .menu button:hover,nav .menu button:focus-visible{background:var(--soft)}
 nav .menu button[aria-current="true"]{font-weight:700;color:var(--accent)}
+.cloud{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:baseline;margin:0 0 10px}
+.cloud button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:99px;padding:2px 11px;cursor:pointer;line-height:1.4;font-weight:500}
+.cloud button small{color:var(--muted);margin-left:5px;font-size:.72em;font-weight:600}
+.cloud button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.cloud button[aria-pressed="true"] small{color:inherit}
+.cloud button.dim{color:var(--muted)}
 .linkbtn{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px;text-decoration:underline}
 main{padding:20px 0 64px}
 h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
@@ -732,6 +738,7 @@ function renderBids() {
       <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
         <span class="row"><button class="btn ghost" id="saveSearchBtn">Save this search</button><button class="btn ghost" id="fitBtn">Sort by fit</button><button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></span></div>
       <form id="saveForm" class="row hidden" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Name for this search<input name="name" required maxlength="80" placeholder="VA cybersecurity, Maryland"></label><button class="btn" type="submit" style="align-self:end">Save</button></form>
+      <div id="catCloud"></div>
       <div class="row" style="margin-bottom:8px"><label style="min-width:260px">Agency<select id="agencyFilter"></select></label><span id="enrichMsg" class="muted small" aria-live="polite" style="align-self:end"></span></div>
       <div id="bidTable"></div>
       ${items.length < bidState.total ? `<p><button class="btn ghost" id="moreBtn">Load 50 more</button></p>` : ""}
@@ -750,8 +757,11 @@ function renderBids() {
   sel.innerHTML = `<option value="">All agencies (${items.length})</option>` + Object.entries(depts).sort((a, b) => b[1] - a[1]).map(([d, n]) => `<option value="${esc(d)}" ${d === bidState.agency ? "selected" : ""}>${esc(d)} (${n})</option>`).join("");
   sel.addEventListener("change", () => { bidState.agency = sel.value; drawBidTable(); });
   drawBidTable();
+  const cloud = () => tagCloud($("#catCloud"), items, (x) => x.noticeId, noticeText, bidState.cat, (c) => { bidState.cat = c; cloud(); drawBidTable(); });
+  cloud();
   function drawBidTable() {
   let shown = bidState.agency ? items.filter((i) => dept(i) === bidState.agency) : items;
+  if (bidState.cat) shown = shown.filter((i) => CAT.get(i.noticeId) === bidState.cat);
   const fit = bidState.fit;
   if (fit) shown = shown.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
   $("#bidTable").innerHTML = table([
@@ -1137,16 +1147,18 @@ $("#slForm").addEventListener("submit", async (e) => {
   } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }
 });
+let slCat = "";
 function drawLocal(run) {
-  const host = $("#slRes"); if (!host) return;
+  const host = $("#slRes"); if (!host) return; slCat = "";
   const govs = [...new Set(run.items.map((x) => x.gov))].sort();
   host.innerHTML = `<div id="slWatch" class="row small" style="margin-bottom:8px"></div><div class="kpis"><div class="kpi"><b>${run.items.length}</b><span>open solicitations</span></div>${run.newCount ? `<div class="kpi"><b>${run.newCount}</b><span>new since you last looked</span></div>` : ""}<div class="kpi"><b>${run.withBids}</b><span>of ${run.checked} portals have open bids</span></div>${run.failed ? `<div class="kpi"><b>${run.failed}</b><span>portals did not respond</span></div>` : ""}</div>
+    <div id="slCloud" style="margin-top:12px"></div>
     <div class="panel" style="margin-top:12px"><div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Filter results<input id="slFilter" value="${esc(run.kw)}" placeholder="roofing, janitorial, IT services"></label>
       <label style="min-width:240px">Government<select id="slGov"><option value="">All governments</option>${govs.map((g) => `<option value="${esc(g)}">${esc(g)} (${run.items.filter((x) => x.gov === g).length})</option>`).join("")}</select></label><span id="slMsg" class="small muted" style="align-self:end" aria-live="polite"></span></div><div id="slTbl"></div>
       <p class="muted small" style="margin-top:8px">Covers governments that post on Bonfire and OpenGov Procurement. Agencies that use other sites will not appear.</p></div>`;
   const draw = () => {
     const q = $("#slFilter").value.trim().toLowerCase(), g = $("#slGov").value;
-    const rows = run.items.filter((x) => (!g || x.gov === g) && (!q || (x.title + " " + x.number + " " + x.text + " " + x.gov).toLowerCase().includes(q))).sort((a, b) => (a.due ? new Date(a.due).getTime() : 9e15) - (b.due ? new Date(b.due).getTime() : 9e15));
+    const rows = run.items.filter((x) => (!g || x.gov === g) && (!slCat || CAT.get(x.id) === slCat) && (!q || (x.title + " " + x.number + " " + x.text + " " + x.gov).toLowerCase().includes(q))).sort((a, b) => (a.due ? new Date(a.due).getTime() : 9e15) - (b.due ? new Date(b.due).getTime() : 9e15));
     $("#slTbl").innerHTML = rows.length ? table([
       { h: "Solicitation", f: (x) => `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.number)}${x.type ? " · " + esc(x.type) : ""}</span>` },
       { h: "Government", f: (x) => `${esc(x.gov)}<br><span class="pill">${esc(x.src)}</span>` },
@@ -1170,6 +1182,8 @@ function drawLocal(run) {
     $("#slWatchBtn")?.addEventListener("click", () => flip(true)); $("#slUnwatch")?.addEventListener("click", () => flip(false));
   };
   watch();
+  const cloud = () => tagCloud($("#slCloud"), run.items, (x) => x.id, (x) => `${x.title} (${x.gov}) ${String(x.text || "").slice(0, 150)}`, slCat, (c) => { slCat = c; cloud(); draw(); });
+  cloud();
 }
 
 /* ---------- MARKET tab ---------- */
@@ -1310,6 +1324,32 @@ async function loadSaved() {
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
 }
 
+/* ---------- kind-of-work tag cloud ---------- */
+const CAT = new Map(); // id -> category, kept for the session
+async function loadCats(rows, idOf, textOf) {
+  const todo = rows.filter((x) => !CAT.has(idOf(x)));
+  for (let i = 0; i < todo.length; i += 300) {
+    const part = todo.slice(i, i + 300);
+    const r = await fetch("/api/categorize", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ items: part.map((x) => ({ id: idOf(x), text: textOf(x) })) }) });
+    if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) throw new ApiError(j.error || "Sorting failed", "cat");
+    j.results.forEach((x) => CAT.set(x.id, x.category));
+  }
+}
+/** Draw a tag cloud of major kinds of work into host. Selecting a tag calls onPick(category or ""). */
+async function tagCloud(host, rows, idOf, textOf, active, onPick) {
+  if (!host) return;
+  host.innerHTML = '<span class="muted small">Sorting by kind of work…</span>';
+  try { await loadCats(rows, idOf, textOf); } catch (err) { if (err.kind !== "auth") host.innerHTML = ""; return; }
+  if (!host.isConnected) return;
+  const n = {}; rows.forEach((x) => { const c = CAT.get(idOf(x)) || "Other"; n[c] = (n[c] || 0) + 1; });
+  const tags = Object.entries(n).sort((a, b) => (a[0] === "Other") - (b[0] === "Other") || b[1] - a[1]);
+  const max = Math.max(...tags.map((t) => t[1]));
+  host.innerHTML = '<div class="cloud" role="group" aria-label="Filter by kind of work">' + tags.map(([c, k]) => `<button type="button" data-cat="${esc(c)}" aria-pressed="${active === c}" class="${c === "Other" ? "dim" : ""}" style="font-size:${(13 + 9 * Math.sqrt(k / max)).toFixed(1)}px">${esc(c)}<small>${k}</small></button>`).join("") + "</div>";
+  $$("[data-cat]", host).forEach((b) => b.addEventListener("click", () => onPick(b.getAttribute("aria-pressed") === "true" ? "" : b.dataset.cat)));
+}
+
 /* ---------- fit ranking ---------- */
 let FOCUS = null;
 async function loadFocus() {
@@ -1349,10 +1389,13 @@ const noticeText = (x) => `${x.title} (${String(x.agency || "").split(".")[0]})`
 /* ---------- EARLY NOTICES ---------- */
 $("#earlyState").innerHTML = '<option value="">Anywhere</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
 const EARLY_LABEL = { r: "Sources sought", p: "Presolicitation", s: "Special notice" };
-function drawEarly(rows, total, fit) {
+let earlyCat = "";
+function drawEarly(all, total, fit) {
   const out = $("#earlyOut");
+  let rows = all;
   if (fit) rows = rows.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
-  out.innerHTML = `<div class="row" style="margin-bottom:8px"><span class="muted small">Showing ${rows.length}${total > rows.length ? " of " + total : ""}. ${fit ? "Best fit first." : "Sources sought come first, then presolicitations."} Select a row for details.</span> <button class="btn ghost" id="earlyFit" type="button">${fit ? "Edit your focus" : "Sort by fit"}</button> <span id="earlyMsg" class="small muted" aria-live="polite"></span></div><div class="panel" id="earlyTbl"></div>`;
+  if (earlyCat) rows = rows.filter((x) => CAT.get(x.noticeId) === earlyCat);
+  out.innerHTML = `<div id="earlyCloud"></div><div class="row" style="margin-bottom:8px"><span class="muted small">Showing ${rows.length}${total > all.length ? " of " + total : ""}. ${fit ? "Best fit first." : "Sources sought come first, then presolicitations."} Select a row for details.</span> <button class="btn ghost" id="earlyFit" type="button">${fit ? "Edit your focus" : "Sort by fit"}</button> <span id="earlyMsg" class="small muted" aria-live="polite"></span></div><div class="panel" id="earlyTbl"></div>`;
   $("#earlyTbl").innerHTML = table([
     ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(x.noticeId)) }] : []),
     { h: "Type", f: (x) => `<span class="pill${x.noticeTypeCode === "r" ? " ok" : ""}">${esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "")}</span>` },
@@ -1363,14 +1406,15 @@ function drawEarly(rows, total, fit) {
   ], rows, { onRow: 1 });
   $$("#earlyTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(rows[+tr.dataset.i])));
   $("#earlyFit").addEventListener("click", async (e) => {
-    if (fit) { editFocus(() => drawEarly(rows, total, null) || $("#earlyFit").click()); return; }
+    if (fit) { editFocus(() => drawEarly(all, total, null) || $("#earlyFit").click()); return; }
     const b = e.target; b.disabled = true; $("#earlyMsg").textContent = "Ranking…";
     try {
-      const m = await rankByFit(rows, (x) => x.noticeId, noticeText, () => $("#earlyFit").click());
-      if (m) drawEarly(rows, total, m); else $("#earlyMsg").textContent = "";
+      const m = await rankByFit(all, (x) => x.noticeId, noticeText, () => $("#earlyFit").click());
+      if (m) drawEarly(all, total, m); else $("#earlyMsg").textContent = "";
     } catch (err) { if (err.kind !== "auth") $("#earlyMsg").textContent = "Could not rank: " + err.message; }
     b.disabled = false;
   });
+  tagCloud($("#earlyCloud"), all, (x) => x.noticeId, noticeText, earlyCat, (c) => { earlyCat = c; drawEarly(all, total, fit); });
 }
 $("#earlyForm").addEventListener("submit", async (e) => {
   e.preventDefault(); const out = $("#earlyOut"), btn = $("#earlyGo"), fd = new FormData(e.target);
@@ -1382,6 +1426,7 @@ $("#earlyForm").addEventListener("submit", async (e) => {
     const rank = { r: 0, p: 1, s: 2 };
     const rows = (r.notices || []).slice().sort((a, b) => (rank[a.noticeTypeCode] ?? 9) - (rank[b.noticeTypeCode] ?? 9) || (Date.parse(a.responseDeadline) || 9e15) - (Date.parse(b.responseDeadline) || 9e15));
     if (!rows.length) { out.innerHTML = '<div class="state">No early notices match. Try fewer filters or another keyword.</div>'; return; }
+    earlyCat = "";
     drawEarly(rows, r.totalRecords, null);
   } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }

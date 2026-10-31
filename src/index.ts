@@ -2,7 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import APP_HTML from "./app.html";
 import { handleStore } from "./store.js";
 import { refreshWatched, purgeLocal } from "./local.js";
-import { rankTexts } from "./rank.js";
+import { rankTexts, categorizeTexts } from "./rank.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -546,6 +546,18 @@ export default {
       try {
         const r = await rankTexts(items.map((i) => String(i.text || "")), profile);
         return json({ results: items.map((i, k) => ({ id: i.id, ...r[k] })) });
+      } catch (e: any) {
+        return json({ error: String(e?.message || e) }, 502);
+      }
+    }
+
+    if (url.pathname === "/api/categorize" && req.method === "POST") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const b: any = await req.json().catch(() => ({}));
+      const items: { id: string; text: string }[] = Array.isArray(b.items) ? b.items.slice(0, 400) : [];
+      try {
+        const c = await categorizeTexts(items.map((i) => String(i.text || "")));
+        return json({ results: items.map((i, k) => ({ id: i.id, category: c[k] })) });
       } catch (e: any) {
         return json({ error: String(e?.message || e) }, 502);
       }
