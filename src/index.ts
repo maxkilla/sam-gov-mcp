@@ -131,8 +131,10 @@ const REFERENCE_HOSTS = /(^|\.)(ecfr\.gov|federalregister\.gov|acquisition\.gov|
 function ttlSeconds(host: string): number {
   if (LIVE_HOSTS.has(host)) return 0;
   if (REFERENCE_HOSTS.test(host)) return 3600; // slow-changing reference data
+  if (PORTAL_HOSTS.test(host)) return 1800; // city and county bid portals change slowly, and a state scan makes hundreds of calls
   return 600; // everything else: 10 minutes
 }
+const PORTAL_HOSTS = /(^|\.)(bonfirehub\.com|opengov\.com)$/;
 const CACHEABLE_TYPE = /json|text|xml|csv/i;
 const MAX_CACHED_CHARS = 1_000_000;
 
