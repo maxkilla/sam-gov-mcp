@@ -259,6 +259,11 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <label>Agency<select name="agency" id="grantAgency"><option value="">All agencies</option></select></label>
         <label>Status<select name="status"><option value="forecasted,posted">Open and forecast</option><option value="posted">Open now</option><option value="forecasted">Forecast only</option><option value="closed">Closed</option><option value="archived">Archived</option></select></label>
         <label>Assistance listing<input name="cfda" placeholder="47.076" pattern="[0-9]{2}\.[0-9]{3}"></label>
+        <label>Who can apply<select name="eligibilities"><option value="">Anyone</option><option value="23">Small businesses</option><option value="22">For-profit, other than small</option><option value="12">Nonprofits (501(c)(3))</option><option value="13">Nonprofits (not 501(c)(3))</option><option value="20">Private universities</option><option value="06">Public universities</option><option value="00">State governments</option><option value="01">County governments</option><option value="02">City or township governments</option><option value="04">Special districts</option><option value="05">School districts</option><option value="07">Tribal governments</option><option value="11">Other tribal organizations</option><option value="08">Housing authorities</option><option value="21">Individuals</option><option value="99">Unrestricted</option><option value="25">Others</option></select></label>
+        <label>Funding type<select name="fundingInstruments"><option value="">Any</option><option value="G">Grant</option><option value="CA">Cooperative agreement</option><option value="PC">Procurement contract</option><option value="O">Other</option></select></label>
+        <label>Topic<select name="fundingCategories"><option value="">Any</option><option value="AG">Agriculture</option><option value="AR">Arts</option><option value="BC">Business and commerce</option><option value="CD">Community development</option><option value="CP">Consumer protection</option><option value="DPR">Disaster prevention and relief</option><option value="ED">Education</option><option value="ELT">Employment, labor and training</option><option value="EN">Energy</option><option value="ENV">Environment</option><option value="FN">Food and nutrition</option><option value="HL">Health</option><option value="HO">Housing</option><option value="HU">Humanities</option><option value="ISS">Income security and social services</option><option value="IIJ">Infrastructure</option><option value="LJL">Law, justice and legal services</option><option value="NR">Natural resources</option><option value="OZ">Opportunity zones</option><option value="RT">Recreation and tourism</option><option value="ST">Science and technology</option><option value="T">Transportation</option><option value="O">Other</option></select></label>
+        <label>Posted<select name="dateRange"><option value="">Any time</option><option value="3">Last 3 days</option><option value="7">Last week</option><option value="14">Last 2 weeks</option><option value="28">Last 4 weeks</option><option value="56">Last 8 weeks</option></select></label>
+        <label>Sort by<select name="sortBy"><option value="">Best match</option><option value="closeDate|asc">Closing soonest</option><option value="openDate|desc">Newest first</option><option value="closeDate|desc">Closing latest</option></select></label>
         <div><button class="btn" type="submit" id="grantGo">Search grants</button></div>
       </form>
     </div>
@@ -826,32 +831,67 @@ async function loadGrantAgencies() {
     grantAgenciesLoaded = true;
   } catch { sel.innerHTML = '<option value="">All agencies</option>'; }
 }
+let gState = null;
+async function grantSearch(start) {
+  const f = gState.form, out = $("#grantOut");
+  const r = await fetch("/api/grants/search", { method: "POST", headers: { authorization: "Bearer " + TOKEN, "content-type": "application/json" }, body: JSON.stringify({ keyword: f.keyword, agencies: f.agency, cfda: f.cfda, oppStatuses: (f.status || "").replace(/,/g, "|"), eligibilities: f.eligibilities, fundingInstruments: f.fundingInstruments, fundingCategories: f.fundingCategories, dateRange: f.dateRange, sortBy: f.sortBy, start, rows: 50 }) });
+  if (r.status === 401) { showLogin("That token was not accepted."); throw new ApiError("Signed out", "auth"); }
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ApiError(j.error || "Grants search failed", "grants");
+  const rows = j.items.map((g) => ({ ...g, title: gText(g.title), agencyName: g.agency, opportunityNumber: g.number, close: gDate(g.closeDate), open: gDate(g.openDate) }));
+  gState.items = start ? gState.items.concat(rows) : rows; gState.total = j.total;
+  return out;
+}
 $("#grantForm").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const f = Object.fromEntries(new FormData(e.target)), out = $("#grantOut"), btn = $("#grantGo");
-  const args = clean({ keyword: f.keyword, agency: f.agency, cfda: f.cfda, oppStatuses: f.status ? f.status.split(",") : undefined, rows: 50 });
+  const out = $("#grantOut"), btn = $("#grantGo");
+  gState = { form: Object.fromEntries(new FormData(e.target)), items: [], total: 0, fit: null, within: "", q: "" };
   btn.disabled = true; out.innerHTML = loading("Searching Grants.gov…");
-  try {
-    const r = await api("grants_search", args);
-    const items = (r.data.grants || []).map((g) => ({ ...g, title: gText(g.title) })), total = r.data.totalRecords || 0;
-    if (!items.length) { out.innerHTML = '<div class="state">No grants matched. Try one keyword instead of several, or clear the agency.</div>'; return; }
-    const soon = items.filter((g) => { const d = daysUntil(gDate(g.closeDate)); return d != null && d >= 0 && d <= 30; }).length;
-    const byAgency = {}; items.forEach((g) => { byAgency[g.agencyName] = (byAgency[g.agencyName] || 0) + 1; });
-    const bars = Object.entries(byAgency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => ({ label: k, value: v, display: String(v) }));
-    out.innerHTML = `<div class="kpis"><div class="kpi"><b>${total.toLocaleString()}</b><span>matching opportunities</span></div><div class="kpi"><b>${soon}</b><span>of the ${items.length} shown close within 30 days</span></div></div>
-      <div class="panel" style="margin-top:12px"><h2>Who is funding this</h2><p class="muted small" style="margin-top:-6px">Agencies among the ${items.length} results shown.</p><div id="gBars"></div></div>
-      <div class="panel" style="margin-top:12px"><h2>Opportunities</h2>${total > items.length ? `<p class="muted small" style="margin-top:-6px">Showing the first ${items.length} of ${total.toLocaleString()}. Grants.gov does not page results, so narrow with an agency, program number or a more specific keyword.</p>` : ""}<div id="gTable"></div></div>`;
-    barChart($("#gBars"), bars);
-    $("#gTable").innerHTML = table([
-      { h: "Opportunity", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.opportunityNumber || "")}</span>` },
-      { h: "Agency", f: (x) => esc(x.agencyName || x.agencyCode || "") },
-      { h: "Status", f: (x) => `<span class="pill ${x.status === "posted" ? "ok" : ""}">${esc(G_STATUS[x.status] || x.status || "")}</span>` },
-      { h: "Closes", f: (x) => x.closeDate ? dueLabel(gDate(x.closeDate)) : '<span class="muted">not set</span>' },
-    ], items, { onRow: 1 });
-    $$("#gTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openGrant(items[+tr.dataset.i])));
-  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  try { await grantSearch(0); drawGrants(); }
+  catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }
 });
+function drawGrants() {
+  const out = $("#grantOut"), g0 = gState, items = g0.items, total = g0.total;
+  if (!items.length) { out.innerHTML = '<div class="state">No grants matched. Remove a filter, try one keyword instead of several, or choose "Anyone" under who can apply.</div>'; return; }
+  const soon = items.filter((g) => { const d = daysUntil(g.close); return d != null && d >= 0 && d <= 30; }).length;
+  const byAgency = {}; items.forEach((g) => { byAgency[g.agency] = (byAgency[g.agency] || 0) + 1; });
+  const bars = Object.entries(byAgency).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => ({ label: k, value: v, display: String(v) }));
+  out.innerHTML = `<div class="kpis"><div class="kpi"><b>${total.toLocaleString()}</b><span>matching opportunities</span></div><div class="kpi"><b>${soon}</b><span>of the ${items.length} loaded close within 30 days</span></div></div>
+    <div class="panel" style="margin-top:12px"><h2>Who is funding this</h2><p class="muted small" style="margin-top:-6px">Agencies among the ${items.length} loaded.</p><div id="gBars"></div></div>
+    <div class="panel" style="margin-top:12px"><div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Opportunities</h2><span class="row"><button class="btn ghost" id="gFit" type="button">${g0.fit ? "Edit your focus" : "Sort by fit"}</button></span></div>
+      <div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Filter these results<input id="gQ" value="${esc(g0.q)}" placeholder="words in the title or number"></label>
+      <label style="min-width:180px">Closes<select id="gWithin"><option value="">Any time</option><option value="7">Within 7 days</option><option value="30">Within 30 days</option><option value="90">Within 90 days</option><option value="none">No close date</option></select></label><span id="gMsg" class="muted small" style="align-self:end" aria-live="polite"></span></div>
+      <div id="gTable"></div>${items.length < total ? `<p><button class="btn ghost" id="gMore" type="button">Load 50 more</button> <span class="muted small">${items.length.toLocaleString()} of ${total.toLocaleString()} loaded</span></p>` : ""}</div>`;
+  barChart($("#gBars"), bars);
+  $("#gWithin").value = g0.within;
+  const draw = () => {
+    const q = g0.q.trim().toLowerCase(), w = g0.within, fit = g0.fit;
+    let rows = items.filter((g) => (!q || (g.title + " " + g.number).toLowerCase().includes(q)) && (!w || (w === "none" ? !g.close : (() => { const d = daysUntil(g.close); return d != null && d >= 0 && d <= +w; })())));
+    if (fit) rows = rows.slice().sort((a, b) => ((fit.get(String(b.id)) || {}).score ?? -1) - ((fit.get(String(a.id)) || {}).score ?? -1));
+    $("#gMsg").textContent = rows.length === items.length ? "" : `${rows.length} of ${items.length} shown`;
+    $("#gTable").innerHTML = rows.length ? table([
+      ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(String(x.id))) }] : []),
+      { h: "Opportunity", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.number || "")}${x.cfda && x.cfda.length ? " · listing " + esc(x.cfda.join(", ")) : ""}</span>` },
+      { h: "Agency", f: (x) => esc(x.agency || x.agencyCode || "") },
+      { h: "Posted", f: (x) => x.open ? esc(new Date(x.open).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })) : "" },
+      { h: "Status", f: (x) => `<span class="pill ${x.status === "posted" ? "ok" : ""}">${esc(G_STATUS[x.status] || x.status || "")}</span>` },
+      { h: "Closes", f: (x) => x.close ? dueLabel(x.close) : '<span class="muted">not set</span>' },
+    ], rows, { onRow: 1 }) : '<div class="state">Nothing loaded matches these filters. Clear them, or load more.</div>';
+    document.querySelectorAll("#gTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openGrant(rows[+tr.dataset.i])));
+  };
+  draw();
+  $("#gQ").addEventListener("input", (e) => { g0.q = e.target.value; draw(); });
+  $("#gWithin").addEventListener("change", (e) => { g0.within = e.target.value; draw(); });
+  $("#gMore")?.addEventListener("click", async (e) => { e.target.disabled = true; try { await grantSearch(items.length); drawGrants(); } catch (err) { if (err.kind !== "auth") { e.target.disabled = false; $("#gMsg").textContent = "Could not load more: " + err.message; } } });
+  $("#gFit").addEventListener("click", async (e) => {
+    if (g0.fit) { editFocus(() => { g0.fit = null; drawGrants(); $("#gFit").click(); }); return; }
+    const b = e.target; b.disabled = true; $("#gMsg").textContent = "Ranking…";
+    try { const m = await rankByFit(items, (x) => String(x.id), (x) => `${x.title} (${x.agency})`, () => $("#gFit").click()); if (m) { g0.fit = m; drawGrants(); } else $("#gMsg").textContent = ""; }
+    catch (err) { if (err.kind !== "auth") $("#gMsg").textContent = "Could not rank: " + err.message; }
+    b.disabled = false;
+  });
+}
 async function openGrant(g) {
   openDrawer("Grant", `<h1>${esc(gText(g.title))}</h1><p class="muted">${esc(g.agencyName || "")} · ${esc(g.opportunityNumber || "")}</p><div id="gDetail">${loading("Loading grant detail…")}</div>`);
   let d;

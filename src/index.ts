@@ -470,6 +470,53 @@ export default {
       return json({ colo: (req as any).cf?.colo, results: out });
     }
 
+    if (url.pathname === "/api/grants/search" && req.method === "POST") {
+      // Grants.gov search with the filters the packaged tool does not expose: who can apply, funding type, category,
+      // posted-within, sort order and paging. Values are checked against allow-lists before they reach Grants.gov.
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const b: any = await req.json().catch(() => ({}));
+      const list = (v: unknown, ok: RegExp) => String(v ?? "").split("|").map((x) => x.trim()).filter((x) => ok.test(x)).join("|");
+      const STATUS = new Set(["forecasted", "posted", "closed", "archived"]);
+      const SORTS = new Set(["openDate|desc", "closeDate|asc", "closeDate|desc", "oppNum|asc"]);
+      const payload: Record<string, unknown> = {
+        keyword: String(b.keyword ?? "").slice(0, 200),
+        cfda: /^\d{2}\.\d{3}$/.test(String(b.cfda ?? "")) ? b.cfda : "",
+        agencies: list(b.agencies, /^[A-Za-z0-9._-]{2,30}$/),
+        eligibilities: list(b.eligibilities, /^\d{2}$/),
+        fundingInstruments: list(b.fundingInstruments, /^[A-Z]{1,2}$/),
+        fundingCategories: list(b.fundingCategories, /^[A-Z]{1,3}$/),
+        oppStatuses: list(b.oppStatuses, /^[a-z]+$/).split("|").filter((x) => STATUS.has(x)).join("|") || "forecasted|posted",
+        rows: Math.min(50, Math.max(1, Number(b.rows) || 50)),
+        startRecordNum: Math.max(0, Math.floor(Number(b.start) || 0)),
+      };
+      if (SORTS.has(b.sortBy)) payload.sortBy = b.sortBy;
+      if (/^(3|7|14|21|28|35|42|49|56)$/.test(String(b.dateRange ?? ""))) payload.dateRange = String(b.dateRange);
+      const cfg = cacheFor(env, ctx);
+      const exec = async () => {
+        const r = await fetch("https://api.grants.gov/v1/api/search2", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(payload),
+          signal: AbortSignal.timeout(20000),
+        });
+        if (!r.ok) throw new Error("Grants.gov answered " + r.status);
+        return (await r.json()) as any;
+      };
+      try {
+        const j = cfg ? await cacheALS.run({ ...cfg, hits: 0, misses: 0, oldestAgeSeconds: 0 }, exec) : await exec();
+        const d = j?.data;
+        if (!d) return json({ error: "Grants.gov returned no data" }, 502);
+        const facet = (a: any[]) => (a || []).map((x) => ({ value: x.value, label: x.label, count: x.count }));
+        return json({
+          total: d.hitCount ?? 0,
+          items: (d.oppHits || []).map((h: any) => ({ id: h.id, number: h.number, title: h.title, agency: h.agency, agencyCode: h.agencyCode, openDate: h.openDate, closeDate: h.closeDate, status: h.oppStatus, docType: h.docType, cfda: h.cfdaList || [] })),
+          facets: { fundingCategories: facet(d.fundingCategories), eligibilities: facet(d.eligibilities), fundingInstruments: facet(d.fundingInstruments) },
+        });
+      } catch (e: any) {
+        return json({ error: "Grants.gov search unavailable: " + String(e?.message || e) }, 502);
+      }
+    }
+
     if (url.pathname === "/api/grants/agencies") {
       // Department list for the Grants tab dropdown. Grants.gov only filters by a pipe-joined list of
       // sub-agency codes, so each department's value is built from its current sub-agencies.
