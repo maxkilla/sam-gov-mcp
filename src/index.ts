@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import APP_HTML from "./app.html";
-import { handleStore, runAllSavedSearches } from "./store.js";
+import { handleStore } from "./store.js";
+import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -215,6 +216,8 @@ interface Env {
   GOV_RELAY_URL?: string;
   RELAY_TOKEN?: string;
   DB?: D1Database;
+  /** Optional: where the daily digest is sent (Slack, Discord, n8n or ntfy URL). Set as a Secret. */
+  ALERT_WEBHOOK_URL?: string;
 }
 
 const DATA_MAP_URI = "samgov://data-map/state-local";
@@ -477,6 +480,18 @@ export default {
       return json(envelope, 200);
     }
 
+    if (url.pathname === "/api/alerts") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const hook = env.ALERT_WEBHOOK_URL?.trim();
+      if (req.method === "GET") return json({ configured: !!hook, kind: hook ? (/(^|\/\/)ntfy\./.test(hook) ? "ntfy" : "webhook") : null });
+      if (req.method === "POST") {
+        if (!hook) return json({ error: "No alert webhook is set. Add the ALERT_WEBHOOK_URL secret." }, 400);
+        const due = env.DB ? await collectDue(env.DB) : [];
+        const err = await sendWebhook(hook, "Test alert from your gov contracting dashboard.\n" + (due.length ? digestText(due) : "Nothing is due in the next 3 days."), due);
+        return err ? json({ error: err }, 502) : json({ ok: true });
+      }
+    }
+
     if (url.pathname.startsWith("/api/store")) {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
@@ -519,7 +534,7 @@ export default {
     const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
     const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
     ctx.waitUntil(
-      runAllSavedSearches(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope),
+      runDailyAlerts(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope, env.ALERT_WEBHOOK_URL?.trim() || undefined),
     );
   },
 };

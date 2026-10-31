@@ -186,6 +186,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
   <section id="tab-saved" class="hidden">
     <h1>Saved searches</h1>
     <p class="lede">Searches you want watched. They refresh every morning, and new notices are flagged here.</p>
+    <div id="alertBar" class="state" style="margin-bottom:12px"></div>
     <div id="savedOut"></div>
   </section>
 
@@ -1130,7 +1131,28 @@ const summarize = (p) => [p.query && `“${p.query}”`, p.ncode && "NAICS " + p
 async function refreshBadge() {
   try { const { searches } = await store("GET", "searches"); const n = searches.reduce((s, x) => s + x.newCount, 0); const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); } catch {}
 }
+async function loadAlertBar() {
+  const bar = $("#alertBar");
+  try {
+    const r = await fetch("/api/alerts", { headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) return showLogin("That token was not accepted.");
+    const a = await r.json();
+    bar.innerHTML = a.configured
+      ? `Alerts are on. Each morning you get new matches from these searches, plus pipeline items due within 3 days. <button class="linkbtn" id="alertTest" type="button">Send a test</button> <span id="alertMsg" class="small" aria-live="polite"></span>`
+      : "Alerts are off. Add a Slack, Discord, n8n or ntfy webhook as the <code>ALERT_WEBHOOK_URL</code> secret on the Worker to get a morning digest.";
+    const t = $("#alertTest");
+    if (t) t.addEventListener("click", async () => {
+      t.disabled = true; $("#alertMsg").textContent = "Sending…";
+      try {
+        const x = await fetch("/api/alerts", { method: "POST", headers: { authorization: "Bearer " + TOKEN } }); const j = await x.json().catch(() => ({}));
+        $("#alertMsg").textContent = x.ok ? "Sent. Check your channel." : (j.error || "Could not send.");
+      } catch { $("#alertMsg").textContent = "Could not send."; }
+      t.disabled = false;
+    });
+  } catch { bar.textContent = ""; }
+}
 async function loadSaved() {
+  loadAlertBar();
   const out = $("#savedOut"); out.innerHTML = loading("Loading…");
   try {
     const { searches } = await store("GET", "searches");
