@@ -32,3 +32,42 @@ export async function rankTexts(texts: string[], profile: string): Promise<Ranke
   if (out.length !== texts.length) throw new Error("The ranking service returned an unexpected answer");
   return out;
 }
+
+// ── Major categories (for the tag cloud) ──────────────────────────────────
+export const CATEGORIES = [
+  "IT and software",
+  "Construction and repairs",
+  "Facilities, janitorial and grounds",
+  "Professional and consulting services",
+  "Engineering and research",
+  "Vehicles, equipment and parts",
+  "Medical and lab",
+  "Security and defense",
+  "Supplies and furniture",
+  "Transportation and logistics",
+  "Food and hospitality",
+  "Training and education",
+  "Other",
+];
+
+/** One major category per text. */
+export async function categorizeTexts(texts: string[]): Promise<string[]> {
+  const out: string[] = [];
+  for (let i = 0; i < texts.length; i += 200) {
+    const r = await fetch("https://classifier.dev/v1/classify", {
+      method: "POST",
+      headers: { "content-type": "application/json", "X-Classifier-Share-Data": "false" },
+      body: JSON.stringify({
+        inputs: texts.slice(i, i + 200).map((t) => t.slice(0, 400)),
+        labels: CATEGORIES,
+        instructions: "Each text is a government contracting notice. Pick the single major kind of work or purchase it is for.",
+      }),
+      signal: AbortSignal.timeout(20000),
+    });
+    if (!r.ok) throw new Error(`The sorting service answered ${r.status}`);
+    const j: any = await r.json();
+    for (const x of j.results || []) out.push(CATEGORIES.includes(x.label) ? x.label : "Other");
+  }
+  if (out.length !== texts.length) throw new Error("The sorting service returned an unexpected answer");
+  return out;
+}
