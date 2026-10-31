@@ -1,6 +1,7 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import APP_HTML from "./app.html";
 import { handleStore } from "./store.js";
+import { rankTexts } from "./rank.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
@@ -480,6 +481,33 @@ export default {
       return json(envelope, 200);
     }
 
+    if (url.pathname === "/api/profile") {
+      // One short description of the company, used to rank notices by fit. Stored in KV so it follows you across devices.
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      if (!env.CACHE) return json({ error: "KV is not set up" }, 503);
+      if (req.method === "GET") return json({ profile: (await env.CACHE.get("settings:profile")) || "" });
+      if (req.method === "PUT") {
+        const b: any = await req.json().catch(() => ({}));
+        const text = String(b.profile || "").trim().slice(0, 1500);
+        if (text) await env.CACHE.put("settings:profile", text); else await env.CACHE.delete("settings:profile");
+        return json({ ok: true });
+      }
+    }
+
+    if (url.pathname === "/api/rank" && req.method === "POST") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      const b: any = await req.json().catch(() => ({}));
+      const profile = String(b.profile || (env.CACHE ? await env.CACHE.get("settings:profile") : "") || "").trim();
+      const items: { id: string; text: string }[] = Array.isArray(b.items) ? b.items.slice(0, 300) : [];
+      if (!profile) return json({ error: "Describe your company first." }, 400);
+      try {
+        const r = await rankTexts(items.map((i) => String(i.text || "")), profile);
+        return json({ results: items.map((i, k) => ({ id: i.id, ...r[k] })) });
+      } catch (e: any) {
+        return json({ error: String(e?.message || e) }, 502);
+      }
+    }
+
     if (url.pathname === "/api/alerts") {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       const hook = env.ALERT_WEBHOOK_URL?.trim();
@@ -534,7 +562,7 @@ export default {
     const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
     const cache = env.CACHE ? { kv: env.CACHE, ctx } : undefined;
     ctx.waitUntil(
-      runDailyAlerts(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope, env.ALERT_WEBHOOK_URL?.trim() || undefined),
+      runDailyAlerts(env.DB, async (name, args) => (await runEnvelope(sam, name, args, cache)).envelope, env.ALERT_WEBHOOK_URL?.trim() || undefined, env.CACHE ? await env.CACHE.get("settings:profile") : null),
     );
   },
 };
