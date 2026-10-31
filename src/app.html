@@ -144,6 +144,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
     <button role="tab" data-tab="pricing" aria-selected="false">Pricing</button>
     <button role="tab" data-tab="far" aria-selected="false">FAR</button>
+    <button role="tab" data-tab="local" aria-selected="false">State and local</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
     <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
@@ -251,6 +252,20 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <div class="panel" style="margin-top:16px"><h2>Compliance matrix</h2><p class="muted small" style="margin-top:-6px">Paste a solicitation's clause list (or any text that cites clauses). Award gates such as Section 889, limits on subcontracting and DFARS cyber rules are flagged.</p>
       <form id="farMatrixForm"><label style="width:100%">Clause list or solicitation text<textarea name="text" rows="5" required placeholder="52.212-4, 52.204-25, 52.219-14, 252.204-7012"></textarea></label><p><button class="btn" type="submit">Build matrix</button></p></form>
       <div id="farMatrixOut"></div></div>
+  </section>
+
+  <!-- STATE AND LOCAL -->
+  <section id="tab-local" class="hidden">
+    <h1>State and local bids</h1>
+    <p class="lede">Open solicitations from cities, counties, school districts and state agencies. Pick a state and the dashboard checks every Bonfire and OpenGov portal it knows there.</p>
+    <div class="panel">
+      <form class="filters" id="slForm">
+        <label>State<select name="state" id="slState"></select></label>
+        <label class="wide">Keyword<input name="keyword" placeholder="roofing, janitorial, IT services (optional)"></label>
+        <div><button class="btn" type="submit" id="slGo">Search all portals</button></div>
+      </form>
+    </div>
+    <div id="slOut" style="margin-top:16px"></div>
   </section>
 
   <!-- MARKET -->
@@ -449,7 +464,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "pipeline", "saved", "grants", "pricing", "far", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -888,6 +903,77 @@ $("#farMatrixForm").addEventListener("submit", (e) => {
   renderMatrix(out, c);
 });
 
+/* ---------- STATE & LOCAL tab (Bonfire + OpenGov portals) ---------- */
+$("#slState").innerHTML = '<option value="">Choose a state</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
+let slRun = { id: 0, stop: false, items: [], checked: 0, total: 0, withBids: 0, failed: 0 };
+const slDate = (s) => { const t = Date.parse(s || ""); return isNaN(t) ? null : new Date(t).toISOString(); };
+$("#slForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#slOut"), btn = $("#slGo");
+  if (!f.state) { out.innerHTML = '<div class="state err" role="alert">Choose a state first.</div>'; return; }
+  const run = slRun = { id: slRun.id + 1, stop: false, items: [], checked: 0, total: 0, withBids: 0, failed: 0, state: f.state, kw: f.keyword.trim() };
+  btn.disabled = true; out.innerHTML = loading("Finding procurement portals in " + f.state + "…");
+  try {
+    const [bon, og] = await Promise.all([
+      api("bonfire_list_organizations", { state: f.state, limit: 200 }).then((r) => r.data.organizations || []),
+      api("opengov_list_governments", { state: f.state, limit: 200 }).then((r) => r.data.governments || []),
+    ]);
+    const portals = [...bon.map((o) => ({ src: "Bonfire", gov: o.name, key: o.org })), ...og.map((g) => ({ src: "OpenGov", gov: g.name, key: g.code }))];
+    run.total = portals.length;
+    if (!portals.length) { out.innerHTML = '<div class="state">No Bonfire or OpenGov portals are listed for this state. Many agencies post on their own sites or on other platforms, so this is not a full picture.</div>'; return; }
+    out.innerHTML = `<div id="slProg" class="row" aria-live="polite"></div><div id="slRes"></div>`;
+    const prog = () => { $("#slProg").innerHTML = `<span class="spin"></span><span>Checked ${run.checked} of ${run.total} portals · ${run.items.length} open solicitations found</span><button class="btn ghost" id="slStop" type="button">Stop</button>`; $("#slStop")?.addEventListener("click", () => { run.stop = true; }); };
+    prog(); let next = 0;
+    const worker = async () => {
+      while (next < portals.length && !run.stop && run.id === slRun.id) {
+        const p = portals[next++];
+        try {
+          if (p.src === "Bonfire") {
+            const r = (await api("bonfire_search_opportunities", { org: p.key, limit: 200 })).data.opportunities || [];
+            const rows = r.map((x) => ({ src: p.src, gov: p.gov, id: p.key + "-" + (x.referenceNumber || x.name), title: x.name, number: x.referenceNumber || "", text: x.description || "", type: "", due: slDate(x.closeDate), released: slDate(x.pubDate), link: x.link }));
+            if (rows.length) run.withBids++; run.items.push(...rows);
+          } else {
+            const r = (await api("opengov_search_solicitations", { governmentCode: p.key, limit: 100 })).data.solicitations || [];
+            const rows = r.filter((x) => x.status === "open").map((x) => ({ src: p.src, gov: p.gov, id: p.key + "-" + x.id, title: x.title, number: x.solicitationNumber || "", text: x.department || "", type: x.type || "", due: x.proposalDeadline || null, released: x.releaseDate || null, link: x.link }));
+            if (rows.length) run.withBids++; run.items.push(...rows);
+          }
+        } catch (err) { if (err.kind === "auth") { run.stop = true; return; } run.failed++; }
+        run.checked++; if (run.checked % 4 === 0) prog();
+      }
+    };
+    await Promise.all([worker(), worker(), worker(), worker(), worker(), worker()]);
+    if (run.id !== slRun.id) return;
+    $("#slProg").innerHTML = run.stop ? `<span class="muted">Stopped after ${run.checked} of ${run.total} portals.</span>` : "";
+    drawLocal(run);
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+function drawLocal(run) {
+  const host = $("#slRes"); if (!host) return;
+  const govs = [...new Set(run.items.map((x) => x.gov))].sort();
+  host.innerHTML = `<div class="kpis"><div class="kpi"><b>${run.items.length}</b><span>open solicitations</span></div><div class="kpi"><b>${run.withBids}</b><span>of ${run.checked} portals have open bids</span></div>${run.failed ? `<div class="kpi"><b>${run.failed}</b><span>portals did not respond</span></div>` : ""}</div>
+    <div class="panel" style="margin-top:12px"><div class="row" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Filter results<input id="slFilter" value="${esc(run.kw)}" placeholder="roofing, janitorial, IT services"></label>
+      <label style="min-width:240px">Government<select id="slGov"><option value="">All governments</option>${govs.map((g) => `<option value="${esc(g)}">${esc(g)} (${run.items.filter((x) => x.gov === g).length})</option>`).join("")}</select></label><span id="slMsg" class="small muted" style="align-self:end" aria-live="polite"></span></div><div id="slTbl"></div>
+      <p class="muted small" style="margin-top:8px">Covers governments that post on Bonfire and OpenGov Procurement. Agencies that use other sites will not appear.</p></div>`;
+  const draw = () => {
+    const q = $("#slFilter").value.trim().toLowerCase(), g = $("#slGov").value;
+    const rows = run.items.filter((x) => (!g || x.gov === g) && (!q || (x.title + " " + x.number + " " + x.text + " " + x.gov).toLowerCase().includes(q))).sort((a, b) => (a.due ? new Date(a.due).getTime() : 9e15) - (b.due ? new Date(b.due).getTime() : 9e15));
+    $("#slTbl").innerHTML = rows.length ? table([
+      { h: "Solicitation", f: (x) => `<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.number)}${x.type ? " · " + esc(x.type) : ""}</span>` },
+      { h: "Government", f: (x) => `${esc(x.gov)}<br><span class="pill">${esc(x.src)}</span>` },
+      { h: "Closes", f: (x) => x.due ? dueLabel(x.due) : '<span class="muted">see portal</span>' },
+      { h: "", f: (x) => `<button class="linkbtn" data-track="${esc(x.id)}">Track</button>` },
+    ], rows) : '<div class="state">No open solicitations match. Clear the filter to see everything found.</div>';
+    $$("[data-track]", $("#slTbl")).forEach((b) => b.addEventListener("click", async () => {
+      const x = rows.find((r) => r.id === b.dataset.track);
+      try { await store("PUT", "pipeline/local-" + x.id, { title: x.title, agency: x.gov, due: x.due, uiLink: x.link, status: "watching" }); b.textContent = "Added"; b.disabled = true; $("#slMsg").textContent = "Added to the Pipeline tab."; }
+      catch (err) { if (err.kind !== "auth") $("#slMsg").textContent = "Could not save: " + err.message; }
+    }));
+    $("#slMsg").textContent = $("#slMsg").textContent.startsWith("Added") ? $("#slMsg").textContent : `${rows.length} shown`;
+  };
+  $("#slFilter").addEventListener("input", draw); $("#slGov").addEventListener("change", draw); draw();
+}
+
 /* ---------- MARKET tab ---------- */
 let agenciesLoaded = false;
 async function loadAgencies() {
@@ -1048,7 +1134,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "far", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
