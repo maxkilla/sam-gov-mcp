@@ -139,6 +139,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
   <span class="brand">Bid desk</span>
   <nav role="tablist" aria-label="Sections">
     <button role="tab" data-tab="bids" aria-selected="true">Bids</button>
+    <button role="tab" data-tab="early" aria-selected="false">Early notices</button>
     <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
     <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
     <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
@@ -173,6 +174,33 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       </form>
     </div>
     <div id="bidOut" class="stack" style="margin-top:16px"></div>
+  </section>
+
+  <!-- EARLY NOTICES -->
+  <section id="tab-early" class="hidden">
+    <h1>Early notices</h1>
+    <p class="lede">Sources sought, presolicitations and special notices. These appear before the formal solicitation, while the agency is still shaping the requirement. Answering one puts your firm on their radar and can influence the set-aside.</p>
+    <div class="panel">
+      <form class="filters" id="earlyForm">
+        <label class="wide">Keyword<input name="query" placeholder="cybersecurity, janitorial, roofing"></label>
+        <label>NAICS<input name="ncode" inputmode="numeric" placeholder="541512" pattern="[0-9]{2,6}"></label>
+        <label>Place of performance<select name="state" id="earlyState"></select></label>
+        <label>Set-aside
+          <select name="setAside">
+            <option value="">Any</option><option value="SBA">Small business</option><option value="8A">8(a)</option>
+            <option value="HZS">HUBZone</option><option value="SDVOSBC">Service-disabled veteran</option>
+            <option value="WOSB">Women-owned</option><option value="EDWOSB">Economically disadvantaged WOSB</option>
+            <option value="VSA">Veteran set-aside</option><option value="VSS">Veteran sole source</option>
+          </select></label>
+        <fieldset class="row" style="border:0;padding:0;margin:0"><legend class="small muted">Notice types</legend>
+          <label class="row small" style="margin:0"><input type="checkbox" name="t" value="r" style="width:auto;margin:0" checked> Sources sought</label>
+          <label class="row small" style="margin:0"><input type="checkbox" name="t" value="p" style="width:auto;margin:0" checked> Presolicitation</label>
+          <label class="row small" style="margin:0"><input type="checkbox" name="t" value="s" style="width:auto;margin:0" checked> Special notice</label>
+        </fieldset>
+        <div><button class="btn" type="submit" id="earlyGo">Search early notices</button></div>
+      </form>
+    </div>
+    <div id="earlyOut" style="margin-top:16px"></div>
   </section>
 
   <!-- PIPELINE -->
@@ -465,7 +493,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "early", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -1176,6 +1204,32 @@ async function loadSaved() {
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
 }
 
+/* ---------- EARLY NOTICES ---------- */
+$("#earlyState").innerHTML = '<option value="">Anywhere</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
+const EARLY_LABEL = { r: "Sources sought", p: "Presolicitation", s: "Special notice" };
+$("#earlyForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); const out = $("#earlyOut"), btn = $("#earlyGo"), fd = new FormData(e.target);
+  const types = fd.getAll("t");
+  if (!types.length) { out.innerHTML = '<div class="state">Choose at least one notice type.</div>'; return; }
+  btn.disabled = true; out.innerHTML = loading("Searching…");
+  try {
+    const r = (await api("sam_search_shaping", clean({ query: fd.get("query"), ncode: fd.get("ncode"), state: fd.get("state"), setAside: fd.get("setAside") ? [fd.get("setAside")] : undefined, noticeType: types, limit: 50 }))).data;
+    const rank = { r: 0, p: 1, s: 2 };
+    const rows = (r.notices || []).slice().sort((a, b) => (rank[a.noticeTypeCode] ?? 9) - (rank[b.noticeTypeCode] ?? 9) || (Date.parse(a.responseDeadline) || 9e15) - (Date.parse(b.responseDeadline) || 9e15));
+    if (!rows.length) { out.innerHTML = '<div class="state">No early notices match. Try fewer filters or another keyword.</div>'; return; }
+    out.innerHTML = `<p class="muted small">Showing ${rows.length}${r.totalRecords > rows.length ? " of " + r.totalRecords : ""}. Sources sought come first, then presolicitations. Select a row for details.</p><div class="panel" id="earlyTbl"></div>`;
+    $("#earlyTbl").innerHTML = table([
+      { h: "Type", f: (x) => `<span class="pill${x.noticeTypeCode === "r" ? " ok" : ""}">${esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "")}</span>` },
+      { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
+      { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
+      { h: "Posted", f: (x) => esc(String(x.postedDate || "").slice(0, 10)) },
+      { h: "Respond by", f: (x) => x.responseDeadline ? dueLabel(x.responseDeadline) : '<span class="muted">no date</span>' },
+    ], rows, { onRow: 1 });
+    $$("#earlyTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(rows[+tr.dataset.i])));
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+
 /* ---------- TOOLS ---------- */
 let TOOLS = null, activeTool = null;
 async function loadTools() {
@@ -1219,7 +1273,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
