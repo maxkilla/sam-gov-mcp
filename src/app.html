@@ -36,8 +36,18 @@ header.top{background:var(--surface);border-bottom:1px solid var(--line);positio
 header.top .wrap{display:flex;align-items:center;gap:20px;min-height:54px;flex-wrap:wrap}
 .brand{font-weight:700;font-size:17px;letter-spacing:-.01em}
 nav{display:flex;gap:2px;flex:1;flex-wrap:wrap}
-nav button{background:none;border:0;padding:15px 12px 13px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent}
-nav button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+nav .grp{position:relative}
+nav .grpbtn{background:none;border:0;padding:15px 12px 13px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent}
+nav .grpbtn[aria-haspopup]::after{content:"";display:inline-block;width:6px;height:6px;margin-left:7px;border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-3px) rotate(45deg)}
+nav .grpbtn.on,nav .grpbtn[aria-expanded="true"]{color:var(--ink)}
+nav .grpbtn.on{border-bottom-color:var(--accent)}
+nav .menu{position:absolute;top:calc(100% - 4px);left:0;min-width:200px;max-width:calc(100vw - 32px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(18,32,46,.16);padding:4px;z-index:10}
+nav .menu[hidden]{display:none}
+nav .menu button{white-space:nowrap}
+@media (max-width:640px){header.top .wrap{gap:0 12px}nav{order:3;flex-basis:100%;flex-wrap:nowrap}nav .grpbtn{padding:10px 5px 8px;font-size:13.5px;white-space:nowrap}nav .grpbtn[aria-haspopup]::after{margin-left:4px}header.top .wrap #signout{margin-left:auto}}
+nav .menu button{display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%;text-align:left;padding:9px 12px;border:0;border-radius:6px;border-bottom:0;background:none;color:var(--ink);font-weight:500;cursor:pointer}
+nav .menu button:hover,nav .menu button:focus-visible{background:var(--soft)}
+nav .menu button[aria-current="true"]{font-weight:700;color:var(--accent)}
 .linkbtn{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px;text-decoration:underline}
 main{padding:20px 0 64px}
 h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
@@ -137,18 +147,33 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
 <div id="appRoot" class="hidden">
 <header class="top"><div class="wrap">
   <span class="brand">Bid desk</span>
-  <nav role="tablist" aria-label="Sections">
-    <button role="tab" data-tab="bids" aria-selected="true">Bids</button>
-    <button role="tab" data-tab="early" aria-selected="false">Early notices</button>
-    <button role="tab" data-tab="pipeline" aria-selected="false">Pipeline</button>
-    <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
-    <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
-    <button role="tab" data-tab="pricing" aria-selected="false">Pricing</button>
-    <button role="tab" data-tab="far" aria-selected="false">FAR</button>
-    <button role="tab" data-tab="local" aria-selected="false">State and local</button>
-    <button role="tab" data-tab="market" aria-selected="false">Market</button>
-    <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
-    <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
+  <nav aria-label="Sections">
+    <div class="grp">
+      <button class="grpbtn on" type="button" aria-haspopup="true" aria-expanded="false">Find work</button>
+      <div class="menu" hidden>
+        <button type="button" data-tab="bids" aria-current="true">Bids</button>
+        <button type="button" data-tab="early">Early notices</button>
+        <button type="button" data-tab="grants">Grants</button>
+        <button type="button" data-tab="local">State and local</button>
+      </div>
+    </div>
+    <div class="grp">
+      <button class="grpbtn" type="button" aria-haspopup="true" aria-expanded="false">My work <span id="grpBadge" class="pill warn hidden"></span></button>
+      <div class="menu" hidden>
+        <button type="button" data-tab="pipeline">Pipeline</button>
+        <button type="button" data-tab="saved">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
+      </div>
+    </div>
+    <div class="grp">
+      <button class="grpbtn" type="button" aria-haspopup="true" aria-expanded="false">Research</button>
+      <div class="menu" hidden>
+        <button type="button" data-tab="market">Market</button>
+        <button type="button" data-tab="pricing">Pricing</button>
+        <button type="button" data-tab="far">FAR</button>
+        <button type="button" data-tab="vet">Vet a company</button>
+      </div>
+    </div>
+    <div class="grp"><button class="grpbtn" type="button" data-tab="tools">All tools</button></div>
   </nav>
   <button class="linkbtn" id="signout">Sign out</button>
 </div></header>
@@ -492,7 +517,9 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
 /* ---------- tabs ---------- */
 function setTab(t) {
-  $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
+  $$("nav [data-tab]").forEach((b) => { if (b.dataset.tab === t) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
+  $$("nav .grp").forEach((g) => $(".grpbtn", g).classList.toggle("on", !!$('[data-tab="' + t + '"]', g)));
+  closeMenus();
   ["bids", "early", "pipeline", "saved", "grants", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
@@ -501,7 +528,22 @@ function setTab(t) {
   if (t === "saved") loadSaved();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
-$$("nav button").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+function closeMenus(focusBtn) {
+  $$("nav .menu").forEach((m) => { if (!m.hidden && focusBtn) $(".grpbtn", m.parentNode).focus(); m.hidden = true; $(".grpbtn", m.parentNode).setAttribute("aria-expanded", "false"); });
+}
+$$("nav [data-tab]").forEach((b) => b.addEventListener("click", () => setTab(b.dataset.tab)));
+$$("nav .grpbtn[aria-haspopup]").forEach((g) => g.addEventListener("click", (e) => {
+  e.stopPropagation(); const m = g.nextElementSibling, open = m.hidden;
+  closeMenus(); m.hidden = !open; g.setAttribute("aria-expanded", String(open));
+  if (open) $("button", m).focus();
+}));
+$$("nav .menu").forEach((m) => m.addEventListener("keydown", (e) => {
+  const items = $$("button", m), i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown") { e.preventDefault(); items[(i + 1) % items.length].focus(); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); items[(i - 1 + items.length) % items.length].focus(); }
+  else if (e.key === "Escape") { e.stopPropagation(); closeMenus(true); }
+}));
+document.addEventListener("click", () => closeMenus());
 
 /* ---------- agency resolution (SAM dept string -> USAspending toptier name) ---------- */
 const agencyCache = new Map();
@@ -1169,7 +1211,7 @@ async function loadPipeline() {
 const SET_LABEL = { SBA: "Small business", "8A": "8(a)", HZS: "HUBZone", SDVOSBC: "Service-disabled veteran", WOSB: "Women-owned", EDWOSB: "EDWOSB", VSA: "Veteran set-aside", VSS: "Veteran sole source" };
 const summarize = (p) => [p.query && `“${p.query}”`, p.ncode && "NAICS " + p.ncode, p.state && "in " + p.state, p.setAside && p.setAside.map((s) => SET_LABEL[s] || s).join(", ")].filter(Boolean).join(" · ") || "All notices";
 async function refreshBadge() {
-  try { const { searches } = await store("GET", "searches"); const n = searches.reduce((s, x) => s + x.newCount, 0); const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); } catch {}
+  try { const { searches } = await store("GET", "searches"); const n = searches.reduce((s, x) => s + x.newCount, 0); const b = $("#savedBadge"); b.textContent = n + " new"; b.classList.toggle("hidden", !n); const g = $("#grpBadge"); g.textContent = n; g.classList.toggle("hidden", !n); } catch {}
 }
 async function loadAlertBar() {
   const bar = $("#alertBar");
