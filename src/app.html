@@ -115,6 +115,7 @@ dl.facts dd{margin:0}
 pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:10px;overflow:auto;max-height:480px;font-size:12.5px}
 .hidden{display:none!important}
 .rng{position:relative;height:14px;margin:14px 0 6px}.rngbar{position:absolute;inset:5px 0;border-radius:4px;background:var(--bar,#2a6f8f);opacity:.35}.rngmid{position:absolute;top:0;width:3px;height:14px;margin-left:-1px;border-radius:2px;background:var(--bar,#2a6f8f)}
+.doctext{white-space:pre-wrap;word-break:break-word;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px}mark{background:var(--warn-bg);color:inherit;border-radius:2px}textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit}
 </style>
 </head>
 <body>
@@ -142,6 +143,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <button role="tab" data-tab="saved" aria-selected="false">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
     <button role="tab" data-tab="grants" aria-selected="false">Grants</button>
     <button role="tab" data-tab="pricing" aria-selected="false">Pricing</button>
+    <button role="tab" data-tab="far" aria-selected="false">FAR</button>
     <button role="tab" data-tab="market" aria-selected="false">Market</button>
     <button role="tab" data-tab="vet" aria-selected="false">Vet a company</button>
     <button role="tab" data-tab="tools" aria-selected="false">All tools</button>
@@ -233,6 +235,22 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       <div class="filters"><label>Month<select id="tripMonth"></select></label><label>Nights<input id="tripNights" type="number" min="1" max="60" value="3"></label></div>
       <p id="tripOut" aria-live="polite"></p>
     </div>
+  </section>
+
+  <!-- FAR -->
+  <section id="tab-far" class="hidden">
+    <h1>FAR clauses</h1>
+    <p class="lede">Look up the rules a solicitation cites, find clauses by topic, or turn a clause list into a compliance matrix for your proposal.</p>
+    <div class="panel"><h2>Look up a clause</h2>
+      <form class="filters" id="farClauseForm"><label>Clause number<input name="clause" required placeholder="52.212-4 or 252.204-7012" pattern="\s*(?:[Dd]?[Ff][Aa][Rr][Ss]?\b[\s.:#\-]*)?\d{1,3}\.\d{3,4}-\d{1,4}\s*"></label><div><button class="btn" type="submit">Look up</button></div></form>
+      <div id="farClauseOut" style="margin-top:12px"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Search by topic</h2>
+      <form class="filters" id="farSearchForm"><label class="wide">Topic<input name="query" required placeholder="limitations on subcontracting, covered defense information"></label>
+        <label>Rules<select name="scope"><option value="far">FAR</option><option value="dfars">DFARS</option><option value="both">Both</option></select></label><div><button class="btn" type="submit">Search</button></div></form>
+      <div id="farSearchOut" style="margin-top:12px"></div></div>
+    <div class="panel" style="margin-top:16px"><h2>Compliance matrix</h2><p class="muted small" style="margin-top:-6px">Paste a solicitation's clause list (or any text that cites clauses). Award gates such as Section 889, limits on subcontracting and DFARS cyber rules are flagged.</p>
+      <form id="farMatrixForm"><label style="width:100%">Clause list or solicitation text<textarea name="text" rows="5" required placeholder="52.212-4, 52.204-25, 52.219-14, 252.204-7012"></textarea></label><p><button class="btn" type="submit">Build matrix</button></p></form>
+      <div id="farMatrixOut"></div></div>
   </section>
 
   <!-- MARKET -->
@@ -423,7 +441,7 @@ const curFY = () => { const n = new Date(); return n.getMonth() >= 9 ? n.getFull
 const lastFullFY = () => curFY() - 1;
 
 /* ---------- drawer ---------- */
-function openDrawer(crumb, html) { $("#drawerCrumb").textContent = crumb; $("#drawerBody").innerHTML = html; document.body.classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer").scrollTop = 0; $("#drawerClose").focus(); }
+function openDrawer(crumb, html) { $("#textView")?.remove(); $("#drawerBody").style.display = ""; $("#drawerCrumb").textContent = crumb; $("#drawerBody").innerHTML = html; document.body.classList.add("open"); $("#drawer").setAttribute("aria-hidden", "false"); $("#drawer").scrollTop = 0; $("#drawerClose").focus(); }
 function closeDrawer() { document.body.classList.remove("open"); $("#drawer").setAttribute("aria-hidden", "true"); }
 $("#drawerClose").addEventListener("click", closeDrawer); $("#scrim").addEventListener("click", closeDrawer);
 addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
@@ -431,7 +449,7 @@ addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 /* ---------- tabs ---------- */
 function setTab(t) {
   $$("nav button").forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === t)));
-  ["bids", "pipeline", "saved", "grants", "pricing", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "pipeline", "saved", "grants", "pricing", "far", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -496,7 +514,7 @@ async function runIntel(ids, { agency, naics }) {
 
 /* ---------- notice drawer ---------- */
 async function openNotice(n) {
-  openDrawer("Notice", `<h1>${esc(n.title)}</h1><p class="muted">${esc(String(n.agency || "").split(".").slice(0, 2).map(title).join(" › "))}</p><div id="nDetail">${loading("Loading notice detail…")}</div><div id="nIntel" style="margin-top:16px"></div>`);
+  openDrawer("Notice", `<h1>${esc(n.title)}</h1><p class="muted">${esc(String(n.agency || "").split(".").slice(0, 2).map(title).join(" › "))}</p><div id="nDetail">${loading("Loading notice detail…")}</div><div id="nDocs" style="margin-top:16px"></div><div id="nIntel" style="margin-top:16px"></div>`);
   let d;
   try { d = (await api("sam_get_opportunity", { noticeId: n.noticeId })).data; }
   catch (e) { $("#nDetail").innerHTML = errBox(e); return; }
@@ -522,6 +540,7 @@ async function openNotice(n) {
   $("#travelLink")?.addEventListener("click", (e) => { e.preventDefault(); const p = d.placeOfPerformance; closeDrawer(); setTab("pricing"); $("#perForm [name=city]").value = p.city?.name || ""; $("#perForm [name=state]").value = p.state.code; $("#perForm [name=zip]").value = ""; $("#perForm").requestSubmit(); });
   $("#descMore")?.addEventListener("click", (e) => { $("#desc").classList.toggle("full"); e.target.textContent = $("#desc").classList.contains("full") ? "Show less" : "Show all"; });
   if (d.naics) api("sba_size_standard", { naics: d.naics }).then((r) => { const s = r.data; if ($("#sizeStd") && s.found) $("#sizeStd").textContent = `${s.description}. Small if ${s.revenueLimitUSD ? "under " + money(s.revenueLimitUSD) + " receipts" : s.employeeCountLimit ? "under " + s.employeeCountLimit + " employees" : "within SBA limit"}`; }).catch(() => {});
+  renderDocs($("#nDocs"), d);
   const shell = intelShell(); $("#nIntel").innerHTML = shell.html;
   let agency = null; try { agency = await resolveAgency(n.agency); } catch {}
   if (!d.naics && !agency) { $("#nIntel").innerHTML = '<div class="state">This notice has no NAICS code and the agency could not be matched, so market data is unavailable. Try the Market tab.</div>'; return; }
@@ -757,6 +776,118 @@ $("#perForm").addEventListener("submit", (e) => {
   else $("#perOut").innerHTML = '<div class="state err" role="alert">Enter a city and state, or a ZIP code.</div>';
 });
 
+/* ---------- FAR clauses + compliance matrix ---------- */
+const CLAUSE_RE = /(?<![\d.])(?:252|52)\.\d{3}-\d{1,4}(?!\d)/g;
+const findClauses = (text) => [...new Set(String(text || "").match(CLAUSE_RE) || [])];
+async function renderMatrix(host, clauses) {
+  const list = clauses.slice(0, 25);
+  host.innerHTML = loading("Looking up " + list.length + " clauses in the FAR…");
+  try {
+    const d = (await api("far_compliance_matrix", { clauses: list })).data;
+    const rows = d.rows || [], gates = rows.filter((r) => r.gate).length;
+    const note = rows[0]?.farOverhaulRisk?.note || "";
+    host.innerHTML = `<div class="kpis"><div class="kpi"><b>${d.summary.resolved}</b><span>clauses found</span></div><div class="kpi"><b>${gates}</b><span>award gates to check first</span></div>${d.summary.unresolved ? `<div class="kpi"><b>${d.summary.unresolved}</b><span>not found in the FAR</span></div>` : ""}</div>
+      ${clauses.length > 25 ? `<p class="muted small">Showing the first 25 of ${clauses.length} clauses. The matrix tool takes 25 at a time.</p>` : ""}
+      <div id="mxTbl" style="margin-top:8px"></div>
+      ${(d.unresolved || []).length ? `<p class="small muted">Not found in Title 48: ${d.unresolved.map((u) => esc(u.clauseNumber)).join(", ")}. They may be agency supplements or mistyped.</p>` : ""}
+      <div class="row" style="margin-top:8px"><button class="btn ghost" id="mxCopy">Copy as table</button><span id="mxMsg" class="small muted" aria-live="polite"></span></div>
+      ${note ? `<p class="muted small" style="margin-top:8px">${esc(note)}</p>` : ""}`;
+    $("#mxTbl", host).innerHTML = table([
+      { h: "Clause", f: (r) => `<a style="white-space:nowrap" href="${esc(r.ecfrUrl)}" target="_blank" rel="noopener noreferrer">${esc(r.clauseNumber)}</a><br><span class="muted small">${esc(r.regulation)} ${esc(r.kind)}</span>` },
+      { h: "Title", f: (r) => `${esc(r.heading)}<br><span class="muted small">${esc(r.revision || "")}</span>${r.gate ? `<br><span class="pill warn">Award gate</span> <span class="small">${esc(r.gate)}</span>` : ""}` },
+      { h: "When it applies", f: (r) => r.prescription?.text ? `<details><summary class="small">${esc(r.prescribedIn || "Prescription")}</summary><div class="small muted">${esc(String(r.prescription.text).slice(0, 700))}${r.prescription.text.length > 700 ? "…" : ""}</div></details>` : esc(r.prescribedIn || "") },
+    ], rows);
+    $("#mxCopy", host).addEventListener("click", async () => {
+      const tsv = ["Clause\tTitle\tRevision\tAward gate\tPrescribed in"].concat(rows.map((r) => [r.clauseNumber, r.heading, r.revision || "", r.gate || "", r.prescribedIn || ""].join("\t"))).join("\n");
+      try { await navigator.clipboard.writeText(tsv); $("#mxMsg", host).textContent = "Copied. Paste into a spreadsheet or your proposal."; } catch { $("#mxMsg", host).textContent = "Copy was blocked by the browser."; }
+    });
+  } catch (e) { if (e.kind !== "auth") host.innerHTML = errBox(e); }
+}
+
+/* ---------- notice documents ---------- */
+const fileName = (s) => { try { return decodeURIComponent(String(s || "").replace(/\+/g, " ")); } catch { return String(s || ""); } };
+const kb = (n) => n == null ? "" : n >= 1048576 ? (n / 1048576).toFixed(1) + " MB" : Math.max(1, Math.round(n / 1024)) + " KB";
+function renderDocs(host, d) {
+  const atts = d.attachments || [];
+  const descText = (() => { try { return new DOMParser().parseFromString(String(d.description || ""), "text/html").body.textContent; } catch { return ""; } })();
+  if (!atts.length) { host.innerHTML = `<div class="panel"><h2>Documents</h2><p class="muted">This notice has no attachments. Any FAR clauses cited in its description are below.</p><div id="docClauses"></div></div>`; showClauses($("#docClauses", host), findClauses(descText)); return; }
+  host.innerHTML = `<div class="panel"><h2>Documents</h2><p class="muted small" style="margin-top:-6px">${atts.length} attachment${atts.length === 1 ? "" : "s"} on SAM.gov. Read them here to search the solicitation, statement of work and wage tables.</p>
+    <div class="row"><button class="btn" id="docGo">Read the ${atts.length} document${atts.length === 1 ? "" : "s"}</button><span id="docMsg" class="small muted" aria-live="polite"></span></div><div id="docOut"></div></div>`;
+  $("#docGo", host).addEventListener("click", async (e) => {
+    e.target.disabled = true; const docs = new Array(atts.length); let done = 0, next = 0;
+    const msg = () => { $("#docMsg", host).textContent = `Read ${done} of ${atts.length}…`; }; msg();
+    const worker = async () => { while (next < atts.length) { const i = next++; try { const r = (await api("sam_fetch_attachment_text", { url: atts[i].url })).data; docs[i] = { ...r, i, url: atts[i].url }; } catch (err) { if (err.kind === "auth") return; docs[i] = { i, url: atts[i].url, error: err.message }; } done++; msg(); } };
+    await Promise.all([worker(), worker(), worker()]);
+    $("#docMsg", host).textContent = "";
+    drawDocs($("#docOut", host), docs.filter(Boolean), descText);
+  });
+}
+function drawDocs(out, docs, descText) {
+  const ok = docs.filter((x) => x.text);
+  out.innerHTML = `<div id="docTbl" style="margin-top:12px"></div>
+    <div class="row" style="margin-top:12px"><label style="flex:1;min-width:220px">Find in the documents<input id="docFind" placeholder="bonding, site visit, Davis-Bacon, due date"></label></div><div id="docHits" class="small" aria-live="polite"></div>
+    <h3 style="margin-top:14px">FAR clauses cited</h3><div id="docClauses"></div>`;
+  $("#docTbl", out).innerHTML = table([
+    { h: "Document", f: (x) => `<b>${esc(fileName(x.filename) || "Attachment " + (x.i + 1))}</b>${x.error ? `<br><span class="small muted">${esc(x.error)}</span>` : x.text == null ? `<br><span class="small muted">${esc(x.note || x.extractionError || "Text could not be read. Download it instead.")}</span>` : ""}` },
+    { h: "Pages", num: 1, f: (x) => x.pages ?? "" },
+    { h: "Size", num: 1, f: (x) => kb(x.sizeBytes) },
+    { h: "", f: (x) => `${x.text ? `<button class="linkbtn" data-read="${x.i}">Read</button> · ` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener noreferrer">Download</a>` },
+  ], docs);
+  $$("[data-read]", out).forEach((b) => b.addEventListener("click", () => {
+    const x = docs.find((y) => y.i === +b.dataset.read);
+    openDrawerText(fileName(x.filename) || "Attachment " + (x.i + 1), x.text, x.truncated);
+  }));
+  $("#docFind", out).addEventListener("input", (e) => {
+    const q = e.target.value.trim(), host = $("#docHits", out);
+    if (q.length < 3) { host.innerHTML = ""; return; }
+    const re = new RegExp(q.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), hits = [];
+    for (const x of ok) { const t = x.text; let m; while ((m = re.exec(t)) && hits.length < 40) { hits.push({ name: fileName(x.filename), s: Math.max(0, m.index - 90), e: m.index + q.length + 90, t, q }); } }
+    host.innerHTML = hits.length ? `<p class="muted">${hits.length}${hits.length === 40 ? "+" : ""} matches</p>` + hits.map((h) => `<div class="panel" style="padding:8px 10px;margin:6px 0"><span class="muted">${esc(h.name)}</span><br>…${esc(h.t.slice(h.s, h.e)).replace(new RegExp(esc(h.q).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), (m) => `<mark>${m}</mark>`)}…</div>`).join("") : '<p class="muted">No matches in the documents that could be read.</p>';
+  });
+  showClauses($("#docClauses", out), findClauses([descText].concat(ok.map((x) => x.text)).join("\n")));
+}
+function showClauses(host, clauses) {
+  if (!clauses.length) { host.innerHTML = '<p class="muted small">No FAR or DFARS clause numbers found in the text.</p>'; return; }
+  host.innerHTML = `<p class="small">${clauses.length} clause${clauses.length === 1 ? "" : "s"}: ${clauses.slice(0, 60).map((c) => `<code style="display:inline-block;margin:0 6px 4px 0">${esc(c)}</code>`).join("")}${clauses.length > 60 ? " …" : ""}</p><button class="btn ghost" id="mxGo">Build compliance matrix${clauses.length > 25 ? " (first 25)" : ""}</button><div id="mxOut" style="margin-top:10px"></div>`;
+  $("#mxGo", host).addEventListener("click", (e) => { e.target.disabled = true; renderMatrix($("#mxOut", host), clauses); });
+}
+function openDrawerText(name, text, truncated) {
+  const body = $("#drawerBody"); $("#textView")?.remove();
+  const tv = document.createElement("div"); tv.id = "textView";
+  tv.innerHTML = `<div class="row" style="margin-bottom:8px"><button class="btn ghost" id="txtBack">Back to notice</button><button class="btn ghost" id="txtCopy">Copy text</button><span id="txtMsg" class="small muted" aria-live="polite"></span></div><h1 style="font-size:18px">${esc(name)}</h1>${truncated ? '<p class="muted small">The reader shortened this text. Download the file for the rest.</p>' : ""}<pre class="doctext">${esc(text)}</pre>`;
+  body.style.display = "none"; body.after(tv); $("#drawer").scrollTop = 0;
+  $("#txtCopy").addEventListener("click", async () => { try { await navigator.clipboard.writeText(text); $("#txtMsg").textContent = "Copied."; } catch { $("#txtMsg").textContent = "Copy was blocked."; } });
+  $("#txtBack").addEventListener("click", () => { tv.remove(); body.style.display = ""; $("#drawer").scrollTop = 0; });
+}
+
+/* ---------- FAR tab ---------- */
+$("#farClauseForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); const out = $("#farClauseOut"), n = new FormData(e.target).get("clause").trim(); out.innerHTML = loading("Looking up " + n + "…");
+  try {
+    const d = (await api("far_clause_lookup", { clauseNumber: n })).data;
+    out.innerHTML = `<div class="panel"><h3><a href="${esc(d.ecfrUrl)}" target="_blank" rel="noopener noreferrer">${esc(d.clauseNumber)}</a> ${esc(d.heading)}</h3><p class="muted small">${esc(d.regulation)} ${esc(d.kind)} · revision ${esc(d.revision || "n/a")} · prescribed in ${esc(d.prescribedIn || "n/a")}</p>
+      ${d.prescription?.text ? `<h3 style="margin-top:10px">When it applies</h3><div class="desc">${esc(d.prescription.text)}</div>` : ""}
+      <h3 style="margin-top:10px">Clause text</h3><div class="desc" id="clText">${esc(d.text)}</div><button class="linkbtn" id="clMore">Show all</button>
+      ${d.farOverhaulRisk?.note ? `<p class="muted small" style="margin-top:8px">${esc(d.farOverhaulRisk.note)}</p>` : ""}</div>`;
+    $("#clMore").addEventListener("click", (ev) => { $("#clText").classList.toggle("full"); ev.target.textContent = $("#clText").classList.contains("full") ? "Show less" : "Show all"; });
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+});
+$("#farSearchForm").addEventListener("submit", async (e) => {
+  e.preventDefault(); const f = Object.fromEntries(new FormData(e.target)), out = $("#farSearchOut"); out.innerHTML = loading("Searching the FAR…");
+  try {
+    const rows = (await api("far_search", { query: f.query.trim(), scope: f.scope })).data.rows || [];
+    out.innerHTML = table([
+      { h: "Section", f: (r) => `<a href="${esc(r.ecfrUrl)}" target="_blank" rel="noopener noreferrer">${esc(r.section || r.part)}</a><br><span class="muted small">${esc(r.regulation)}</span>` },
+      { h: "Match", f: (r) => `<span class="small">${esc(r.excerpt || "")}</span>` },
+    ], rows);
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+});
+$("#farMatrixForm").addEventListener("submit", (e) => {
+  e.preventDefault(); const c = findClauses(new FormData(e.target).get("text")), out = $("#farMatrixOut");
+  if (!c.length) { out.innerHTML = '<div class="state err" role="alert">No clause numbers found. Paste text that includes numbers like 52.212-4 or 252.204-7012.</div>'; return; }
+  renderMatrix(out, c);
+});
+
 /* ---------- MARKET tab ---------- */
 let agenciesLoaded = false;
 async function loadAgencies() {
@@ -917,7 +1048,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "pipeline", "saved", "grants", "pricing", "far", "market", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
