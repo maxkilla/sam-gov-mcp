@@ -1,5 +1,7 @@
 // Saved searches, pipeline and vetting history, stored in D1.
 import { ensureState, upsertRows, listRows, stateInfo, markScanned } from "./local.js";
+import { grantPayload, searchGrants } from "./grants.js";
+import { scanWatch, MAX_WATCHES } from "./recompete.js";
 
 export type RunTool = (name: string, args: Record<string, unknown>) => Promise<any>;
 
@@ -42,6 +44,28 @@ export async function runSavedSearch(db: D1Database, id: number, run: RunTool) {
     .bind(now(), env.data.totalRecords ?? opps.length, JSON.stringify(knownList), JSON.stringify([...fresh]), id)
     .run();
   return { opportunities: opps, total: env.data.totalRecords ?? opps.length, newIds: [...fresh], added };
+}
+
+/** Run one saved grant search (newest first, so fresh postings are always in the first page) and record what is new. */
+export async function runGrantSearch(db: D1Database, id: number) {
+  const row: any = await db.prepare("SELECT * FROM grant_searches WHERE id = ?").bind(id).first();
+  if (!row) return null;
+  const res = await searchGrants(grantPayload({ ...parse(row.params, {}), sortBy: "openDate|desc", start: 0, rows: 50 }));
+  const known = new Set<string>(parse(row.known_ids, []));
+  const fresh = new Set<string>(parse(row.new_ids, []));
+  const firstRun = !row.last_run_at;
+  const added: any[] = [];
+  for (const g of res.items) {
+    if (!known.has(String(g.id))) {
+      known.add(String(g.id));
+      if (!firstRun) { fresh.add(String(g.id)); added.push(g); }
+    }
+  }
+  await db
+    .prepare("UPDATE grant_searches SET last_run_at=?, last_total=?, known_ids=?, new_ids=? WHERE id=?")
+    .bind(now(), res.total, JSON.stringify([...known].slice(-2000)), JSON.stringify([...fresh]), id)
+    .run();
+  return { items: res.items, total: res.total, newIds: [...fresh], added };
 }
 
 export async function handleStore(req: Request, url: URL, db: D1Database | undefined, run: RunTool): Promise<Response> {
@@ -90,6 +114,86 @@ export async function handleStore(req: Request, url: URL, db: D1Database | undef
     if (m === "POST" && action === "run") {
       const r = await runSavedSearch(db, id, run);
       return r ? json(r) : json({ error: "not found" }, 404);
+    }
+  }
+
+  if (kind === "grantsearches") {
+    if (!idPart && m === "GET") {
+      const { results } = await db.prepare("SELECT * FROM grant_searches ORDER BY created_at DESC").all<any>();
+      return json({
+        searches: results.map((r) => ({
+          id: r.id, name: r.name, params: parse(r.params, {}), createdAt: r.created_at,
+          lastRunAt: r.last_run_at, lastTotal: r.last_total, newCount: (parse(r.new_ids, []) as string[]).length,
+        })),
+      });
+    }
+    if (!idPart && m === "POST") {
+      const b = await body();
+      const name = String(b.name || "").trim().slice(0, 80);
+      if (!name || typeof b.params !== "object" || !b.params) return json({ error: "name and params are required" }, 400);
+      const { n } = (await db.prepare("SELECT COUNT(*) AS n FROM grant_searches").first<{ n: number }>()) || { n: 0 };
+      if (n >= 20) return json({ error: "You have 20 saved grant searches. Remove one first." }, 400);
+      const r = await db.prepare("INSERT INTO grant_searches (name, params, created_at) VALUES (?,?,?)")
+        .bind(name, JSON.stringify(grantPayload(b.params)), now()).run();
+      const id = Number(r.meta.last_row_id);
+      try { await runGrantSearch(db, id); } catch { /* the baseline runs again on the next refresh */ }
+      return json({ id }, 201);
+    }
+    const id = Number(idPart);
+    if (!Number.isInteger(id)) return json({ error: "bad id" }, 400);
+    if (m === "DELETE" && !action) { await db.prepare("DELETE FROM grant_searches WHERE id=?").bind(id).run(); return json({ ok: true }); }
+    if (m === "POST" && action === "seen") { await db.prepare("UPDATE grant_searches SET new_ids='[]' WHERE id=?").bind(id).run(); return json({ ok: true }); }
+    if (m === "POST" && action === "run") {
+      try { const r = await runGrantSearch(db, id); return r ? json(r) : json({ error: "not found" }, 404); }
+      catch (e: any) { return json({ error: String(e?.message || e) }, 502); }
+    }
+  }
+
+  if (kind === "recompete") {
+    if (!idPart && m === "GET") {
+      const months = Math.min(18, Math.max(1, Number(url.searchParams.get("months")) || 18));
+      const today = new Date().toISOString().slice(0, 10);
+      const until = new Date(Date.now() + months * 30.44 * 86_400_000).toISOString().slice(0, 10);
+      const { results: watches } = await db.prepare("SELECT * FROM recompete_watch ORDER BY created_at").all<any>();
+      const { results: rows } = await db
+        .prepare(
+          `SELECT award_id, MIN(watch_id) AS watch_id, internal_id, incumbent, amount, agency, sub_agency, naics, description, end_date, MIN(seen) AS seen, MIN(first_seen) AS first_seen
+           FROM recompetes WHERE end_date >= ?1 AND end_date <= ?2 GROUP BY award_id ORDER BY end_date LIMIT 1500`,
+        )
+        .bind(today, until)
+        .all<any>();
+      return json({
+        watches: watches.map((w) => ({ id: w.id, name: w.name, naics: w.naics, agency: w.agency, minValue: w.min_value, lastScanAt: w.last_scan_at, lastCount: w.last_count })),
+        items: rows.map((r) => ({ id: r.award_id, internalId: r.internal_id, incumbent: r.incumbent, amount: r.amount, agency: r.agency, subAgency: r.sub_agency, naics: r.naics, description: r.description, endDate: r.end_date, isNew: r.seen === 0 })),
+      });
+    }
+    if (!idPart && m === "POST") {
+      const b = await body();
+      const naics = String(b.naics || "").trim();
+      const agency = String(b.agency || "").trim().slice(0, 120);
+      if (naics && !/^\d{6}$/.test(naics)) return json({ error: "NAICS must be 6 digits" }, 400);
+      if (!naics && !agency) return json({ error: "Give a NAICS code, an agency, or both." }, 400);
+      const { n } = (await db.prepare("SELECT COUNT(*) AS n FROM recompete_watch").first<{ n: number }>()) || { n: 0 };
+      if (n >= MAX_WATCHES) return json({ error: `You can watch ${MAX_WATCHES} combinations. Remove one first.` }, 400);
+      const minValue = Math.max(0, Math.min(1e9, Math.floor(Number(b.minValue) || 100000)));
+      const name = String(b.name || "").trim().slice(0, 80) || [agency, naics && "NAICS " + naics].filter(Boolean).join(" · ");
+      const r = await db.prepare("INSERT INTO recompete_watch (name, naics, agency, min_value, created_at) VALUES (?,?,?,?,?)")
+        .bind(name, naics || null, agency || null, minValue, now()).run();
+      const id = Number(r.meta.last_row_id);
+      const scan = await scanWatch(db, run, id).catch((e) => ({ error: String(e?.message || e) }));
+      return json({ id, scan }, 201);
+    }
+    if (idPart === "seen" && m === "POST") { await db.prepare("UPDATE recompetes SET seen=1 WHERE seen=0").run(); return json({ ok: true }); }
+    const id = Number(idPart);
+    if (!Number.isInteger(id)) return json({ error: "bad id" }, 400);
+    if (m === "DELETE" && !action) {
+      await db.prepare("DELETE FROM recompetes WHERE watch_id=?").bind(id).run();
+      await db.prepare("DELETE FROM recompete_watch WHERE id=?").bind(id).run();
+      return json({ ok: true });
+    }
+    if (m === "POST" && action === "scan") {
+      const r = await scanWatch(db, run, id).catch((e) => ({ error: String(e?.message || e) }));
+      return "error" in r ? json(r, 502) : json(r);
     }
   }
 

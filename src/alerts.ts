@@ -1,9 +1,11 @@
 // Daily digest: new notices from saved searches, and pipeline deadlines coming up.
-import { runSavedSearch, type RunTool } from "./store.js";
+import { runSavedSearch, runGrantSearch, type RunTool } from "./store.js";
 import { rankTexts } from "./rank.js";
 import { collectLocalNew } from "./local.js";
+import { scanAll, collectRecompeteNew } from "./recompete.js";
+import { grantDate, grantLink } from "./grants.js";
 
-export interface AlertItem { kind: "new" | "due"; fit?: "strong" | "possible" | "weak"; title: string; agency?: string; due?: string | null; link?: string; group?: string }
+export interface AlertItem { kind: "new" | "due" | "recompete"; fit?: "strong" | "possible" | "weak"; title: string; agency?: string; due?: string | null; link?: string; group?: string }
 
 const DAY = 86_400_000;
 
@@ -15,6 +17,21 @@ export async function collectNew(db: D1Database, run: RunTool): Promise<AlertIte
     try {
       const res: any = await runSavedSearch(db, r.id, run);
       for (const o of res?.added || []) out.push({ kind: "new", group: r.name, title: o.title, agency: o.agency, due: o.responseDeadline, link: o.uiLink });
+    } catch {
+      // one failing search must not block the rest
+    }
+  }
+  return out;
+}
+
+/** Refresh every saved grant search and collect the opportunities that are new. */
+export async function collectGrantsNew(db: D1Database): Promise<AlertItem[]> {
+  const { results } = await db.prepare("SELECT id, name FROM grant_searches").all<{ id: number; name: string }>();
+  const out: AlertItem[] = [];
+  for (const r of results) {
+    try {
+      const res: any = await runGrantSearch(db, r.id);
+      for (const g of res?.added || []) out.push({ kind: "new", group: `Grants: ${r.name}`, title: g.title, agency: g.agency, due: grantDate(g.closeDate), link: grantLink(g.id) });
     } catch {
       // one failing search must not block the rest
     }
@@ -45,6 +62,13 @@ export function digestText(items: AlertItem[]): string {
     for (const i of fresh.slice(0, 25)) lines.push(`• ${i.fit === "strong" ? "★ " : ""}${i.title} (${i.agency || "agency n/a"}, due ${day(i.due)}) [${i.group}]${i.link ? "\n  " + i.link : ""}`);
     if (fresh.length > 25) lines.push(`…and ${fresh.length - 25} more in the dashboard`);
   }
+  const rec = items.filter((i) => i.kind === "recompete");
+  if (rec.length) {
+    if (lines.length) lines.push("");
+    lines.push(`${rec.length} contract${rec.length === 1 ? "" : "s"} newly ending soon`);
+    for (const i of rec.slice(0, 15)) lines.push(`• ${i.fit === "strong" ? "★ " : ""}${i.title} (${i.agency || "agency n/a"}), ends ${day(i.due)} [${i.group}]`);
+    if (rec.length > 15) lines.push(`…and ${rec.length - 15} more in the dashboard`);
+  }
   if (due.length) {
     if (lines.length) lines.push("");
     lines.push(`Due within 3 days`);
@@ -73,19 +97,25 @@ export async function sendWebhook(url: string, text: string, items: AlertItem[] 
 
 export async function runDailyAlerts(db: D1Database, run: RunTool, webhook?: string, profile?: string | null) {
   const fresh = await collectNew(db, run); // always refresh, even with no webhook, so the badge stays current
+  fresh.push(...(await collectGrantsNew(db)));
+  await scanAll(db, run).catch(() => {});
   if (!webhook) return;
+  const rec = await collectRecompeteNew(db).catch(() => ({ items: [] as AlertItem[], done: async () => {} }));
   const local = await collectLocalNew(db).catch(() => ({ items: [] as AlertItem[], done: async () => {} }));
   fresh.push(...local.items);
-  if (profile && fresh.length) {
+  const rankable = [...fresh, ...rec.items];
+  if (profile && rankable.length) {
     // Put the best matches first and star the strong ones. If ranking fails the digest still goes out in search order.
     try {
-      const r = await rankTexts(fresh.map((i) => `${i.title} (${i.agency || ""})`), profile);
-      fresh.forEach((i, k) => (i.fit = r[k].fit));
-      const score = new Map(fresh.map((i, k) => [i, r[k].score]));
+      const r = await rankTexts(rankable.map((i) => `${i.title} (${i.agency || ""})`), profile);
+      rankable.forEach((i, k) => (i.fit = r[k].fit));
+      const score = new Map(rankable.map((i, k) => [i, r[k].score]));
       fresh.sort((a, b) => (score.get(b) || 0) - (score.get(a) || 0));
+      rec.items.sort((a, b) => (score.get(b) || 0) - (score.get(a) || 0));
     } catch {}
   }
-  const items = [...fresh, ...(await collectDue(db))];
+  const items = [...fresh, ...rec.items, ...(await collectDue(db))];
   if (items.length) await sendWebhook(webhook, digestText(items), items);
   await local.done().catch(() => {});
+  await rec.done().catch(() => {});
 }
