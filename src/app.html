@@ -177,6 +177,8 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <button type="button" data-tab="market">Market</button>
         <button type="button" data-tab="pricing">Pricing</button>
         <button type="button" data-tab="far">FAR</button>
+        <button type="button" data-tab="vehicles">Vehicles</button>
+        <button type="button" data-tab="rules">Rules and policy</button>
         <button type="button" data-tab="vet">Vet a company</button>
       </div>
     </div>
@@ -317,6 +319,51 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       <div class="filters"><label>Month<select id="tripMonth"></select></label><label>Nights<input id="tripNights" type="number" min="1" max="60" value="3"></label></div>
       <p id="tripOut" aria-live="polite"></p>
     </div>
+    <div class="panel" style="margin-top:24px">
+      <h2>Wage determinations</h2>
+      <p class="muted small" style="margin-top:-6px">The Department of Labor wage rates a contract must pay: Service Contract Act for services, Davis-Bacon for construction.</p>
+      <form class="filters" id="wdForm">
+        <label>Contract type<select name="coverage" id="wdCov"><option value="sca">Services (Service Contract Act)</option><option value="dba">Construction (Davis-Bacon)</option></select></label>
+        <label>State<select name="state" id="wdState" required></select></label>
+        <label>County<input name="county" placeholder="Lake"></label>
+        <label id="wdTypeBox" class="hidden">Construction type<select name="constructionType"><option value="Building">Building</option><option value="Residential">Residential</option><option value="Heavy">Heavy</option><option value="Highway">Highway</option></select></label>
+        <div><button class="btn" type="submit" id="wdGo">Find wage determinations</button></div>
+      </form>
+    </div>
+    <div id="wdOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- VEHICLES -->
+  <section id="tab-vehicles" class="hidden">
+    <h1>Vehicles</h1>
+    <p class="lede">Government vehicle auctions from GSA, and the safety record of any model: recalls and owner complaints from NHTSA.</p>
+    <div class="panel"><h2>GSA auctions</h2><div id="auOut"></div></div>
+    <div class="panel" style="margin-top:16px" id="nhPanel">
+      <h2>Recalls and complaints</h2>
+      <form class="filters" id="nhForm">
+        <label>Year<input name="modelYear" type="number" min="1980" max="2030" required placeholder="2015"></label>
+        <label>Make<input name="make" required placeholder="Honda" pattern="[A-Za-z0-9 \-]+"></label>
+        <label>Model<input name="model" required placeholder="Civic" pattern="[A-Za-z0-9 \-]+"></label>
+        <div><button class="btn" type="submit" id="nhGo">Check this vehicle</button></div>
+      </form>
+    </div>
+    <div id="nhOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- RULES -->
+  <section id="tab-rules" class="hidden">
+    <h1>Rules and policy</h1>
+    <p class="lede">What the government is proposing, finalizing and asking comments on, plus the acquisition rules that govern your bids. One search covers the Federal Register, regulations.gov dockets and the CFR.</p>
+    <div class="panel">
+      <form class="filters" id="rulesForm">
+        <label class="wide">Topic<input name="q" required placeholder="cybersecurity, small business set-aside, wage"></label>
+        <label>Federal Register type<select name="type"><option value="">Any</option><option value="PRORULE">Proposed rules</option><option value="RULE">Final rules</option><option value="NOTICE">Notices</option></select></label>
+        <label>Published<select name="since"><option value="90">Last 3 months</option><option value="365" selected>Last year</option><option value="">Any time</option></select></label>
+        <label>Rule book<select name="title"><option value="48">Acquisition (FAR and agency supplements)</option><option value="2">Federal grants</option><option value="13">Business credit (SBA)</option><option value="">All of the CFR</option></select></label>
+        <div><button class="btn" type="submit" id="rulesGo">Search</button></div>
+      </form>
+    </div>
+    <div id="rulesOut" style="margin-top:16px"></div>
   </section>
 
   <!-- FAR -->
@@ -547,13 +594,14 @@ function setTab(t) {
   $$("nav [data-tab]").forEach((b) => { if (b.dataset.tab === t) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
   $$("nav .grp").forEach((g) => $(".grpbtn", g).classList.toggle("on", !!$('[data-tab="' + t + '"]', g)));
   closeMenus();
-  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "rules", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
   if (t === "pipeline") loadPipeline();
   if (t === "saved") loadSaved();
   if (t === "recompete") loadRecompete();
+  if (t === "vehicles") loadAuctions();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 function closeMenus(focusBtn) {
@@ -1415,6 +1463,184 @@ async function loadSaved() {
   } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
 }
 
+/* ---------- WAGE DETERMINATIONS (Pricing tab) ---------- */
+$("#wdState").innerHTML = '<option value="">State</option>' + $("#bidForm select[name=state]").innerHTML.replace(/^<option value="">[^<]*<\/option>/, "");
+$("#wdCov").addEventListener("change", (e) => $("#wdTypeBox").classList.toggle("hidden", e.target.value !== "dba"));
+const urlOk = (u) => /^https?:\/\//.test(u || "") ? u : "#";
+$("#wdForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#wdOut"), btn = $("#wdGo");
+  btn.disabled = true; out.innerHTML = loading("Searching wage determinations…");
+  try {
+    const r = await api("sam_search_wage_determinations", clean({ coverage: f.coverage, state: f.state, county: f.county.trim(), constructionType: f.coverage === "dba" ? f.constructionType : "", activeOnly: true, standardOnly: true, limit: 25 }));
+    const rows = r.data.determinations || [];
+    if (!rows.length) { out.innerHTML = '<div class="state">No active wage determinations matched. Check the county spelling, or leave the county blank to see the whole state.</div>'; return; }
+    out.innerHTML = `<div class="panel"><h2>${rows.length} wage determination${rows.length === 1 ? "" : "s"}</h2><p class="muted small" style="margin-top:-6px">The most specific match, usually the one covering only your county, is listed first.</p><div id="wdTbl"></div></div>`;
+    $("#wdTbl").innerHTML = table([
+      { h: "Reference", f: (x) => `<b>${esc(x.fullReferenceNumber)}</b> <span class="muted small">revision ${x.revisionNumber}</span>` },
+      { h: "Counties", f: (x) => { const c = x.counties || []; return c.length ? esc(c.slice(0, 6).join(", ")) + (c.length > 6 ? ` <span class="muted small">and ${c.length - 6} more</span>` : "") : '<span class="muted">statewide</span>'; } },
+      { h: "Published", f: (x) => esc(x.publishDate || "") },
+      { h: "", f: (x) => `<button class="linkbtn" data-wd="${esc(x.fullReferenceNumber)}" data-rev="${x.revisionNumber}">See rates</button>` },
+    ], rows);
+    $$("#wdTbl [data-wd]").forEach((b) => b.addEventListener("click", () => openWageRates(b.dataset.wd, +b.dataset.rev, f.coverage)));
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+async function openWageRates(ref, rev, coverage) {
+  openDrawer("Wage determination", `<h1>${esc(ref)}</h1><div id="wdRates">${loading("Reading the rate table…")}</div>`);
+  try {
+    const d = (await api("sam_get_wage_rates", { reference: ref, revision: rev, coverage })).data, rates = d.rates || [];
+    const fringeOf = (x) => x.fringePerHour ?? x.fringe ?? null;
+    const hasFringe = rates.some((x) => fringeOf(x) != null);
+    $("#wdRates").innerHTML = `<div class="panel"><dl class="facts">
+        <dt>Type</dt><dd>${esc(d.coverage)}${d.active ? "" : ' <span class="pill">not active</span>'}</dd>
+        <dt>Published</dt><dd>${esc(d.publishDate || "n/a")} <span class="muted small">revision ${esc(d.revision)}</span></dd>
+        ${d.healthAndWelfarePerHour != null ? `<dt>Health and welfare</dt><dd>${rate(d.healthAndWelfarePerHour)} per hour, on top of the wage</dd>` : ""}
+        ${d.executiveOrderMinimumWage ? `<dt>Minimum wage floor</dt><dd>${rate(d.executiveOrderMinimumWage.minimumWage)} <span class="muted small">(${esc(d.executiveOrderMinimumWage.executiveOrder)})</span></dd>` : ""}
+      </dl>
+      ${d.parseConfidence && d.parseConfidence !== "high" ? `<p class="muted small">The rate table was read from plain text with ${esc(d.parseConfidence)} confidence. Check it against the original before you price from it.</p>` : ""}
+      <label style="margin-top:8px">Find a job title<input id="wdQ" placeholder="mechanic, guard, clerk"></label>
+      <div id="wdRateTbl" style="margin-top:8px"></div>
+      <p style="margin-top:10px"><a href="${esc(urlOk(d.sourceUrl))}" target="_blank" rel="noopener noreferrer">Open on SAM.gov</a></p></div>`;
+    const draw = () => {
+      const q = $("#wdQ").value.trim().toLowerCase(), rows = rates.filter((x) => !q || String(x.title).toLowerCase().includes(q));
+      $("#wdRateTbl").innerHTML = rows.length ? table([
+        { h: "Job", f: (x) => `${esc(x.title)} <span class="muted small">${esc(x.code || "")}</span>` },
+        { h: "Hourly wage", num: 1, f: (x) => rate(x.baseRate) },
+        ...(hasFringe ? [{ h: "Fringe", num: 1, f: (x) => fringeOf(x) == null ? "" : rate(fringeOf(x)) }] : []),
+      ], rows) : '<div class="state">No job title matches.</div>';
+    };
+    draw(); $("#wdQ").addEventListener("input", draw);
+  } catch (err) { if (err.kind !== "auth") $("#wdRates").innerHTML = errBox(err); }
+}
+
+/* ---------- VEHICLES tab ---------- */
+let au = { rows: null, at: null, stale: false, q: "", st: "", veh: true, within: "", sort: "end" };
+const usd0 = (n) => n == null ? "" : "$" + Math.round(n).toLocaleString();
+const shortDate = (d) => { const t = new Date(d + "T12:00:00"); return isNaN(t) ? "" : t.toLocaleDateString(undefined, { month: "short", day: "numeric" }); };
+async function loadAuctions(force) {
+  const out = $("#auOut"); if (au.rows && !force) return;
+  out.innerHTML = loading("Loading GSA auctions…");
+  try {
+    const r = await fetch("/api/auctions" + (force ? "?refresh=1" : ""), { headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) { showLogin("That token was not accepted."); return; }
+    const j = await r.json().catch(() => ({})); if (!r.ok) throw new ApiError(j.error || "Could not load auctions", "auctions");
+    au.rows = j.rows; au.at = j.at; au.stale = !!j.stale; drawAuctions();
+  } catch (e) { if (e.kind !== "auth") out.innerHTML = errBox(e); }
+}
+function drawAuctions() {
+  const sts = [...new Set(au.rows.map((x) => x.st).filter(Boolean))].sort();
+  $("#auOut").innerHTML = `<form class="filters" id="auFilters">
+      <label class="wide">Search<input id="auQ" value="${esc(au.q)}" placeholder="F150, bus, generator"></label>
+      <label>State<select id="auSt"><option value="">Any state</option>${sts.map((x) => `<option>${esc(x)}</option>`).join("")}</select></label>
+      <label>Ends within<select id="auWithin"><option value="">Any time</option><option value="1">1 day</option><option value="3">3 days</option><option value="7">A week</option></select></label>
+      <label>Sort by<select id="auSort"><option value="end">Ending soonest</option><option value="bid">Highest bid</option><option value="bidders">Most bidders</option><option value="low">Lowest bid</option></select></label>
+      <label style="display:flex;flex-direction:row;align-items:center;gap:6px;align-self:end"><input type="checkbox" id="auVeh" ${au.veh ? "checked" : ""}> Cars and trucks only</label></form>
+    <p class="muted small" id="auNote" aria-live="polite"></p><div id="auTbl"></div>`;
+  $("#auSt").value = au.st; $("#auWithin").value = au.within; $("#auSort").value = au.sort;
+  const draw = () => {
+    const q = au.q.trim().toLowerCase(), limit = au.within ? Date.now() + (+au.within + 1) * DAY : Infinity;
+    let rows = au.rows.filter((x) => (!au.veh || x.veh) && (!au.st || x.st === au.st) && (!q || `${x.name} ${x.agency} ${x.city}`.toLowerCase().includes(q)) && (limit === Infinity || new Date(x.end + "T23:59:00").getTime() <= limit));
+    const by = { end: (a, b) => a.end.localeCompare(b.end), bid: (a, b) => (b.bid ?? -1) - (a.bid ?? -1), bidders: (a, b) => (b.bidders ?? -1) - (a.bidders ?? -1), low: (a, b) => (a.bid ?? 1e12) - (b.bid ?? 1e12) };
+    rows = rows.slice().sort(by[au.sort]);
+    const shown = rows.slice(0, 150);
+    $("#auNote").textContent = `${rows.length} lot${rows.length === 1 ? "" : "s"}${rows.length > shown.length ? ", showing the first " + shown.length : ""}. Updated ${new Date(au.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}${au.stale ? " (GSA could not be reached, so this may be out of date)" : ""}. Condition, VIN and inspection details are on each GSA page.`;
+    $("#auTbl").innerHTML = shown.length ? table([
+      { h: "Item", f: (x) => `${x.link ? `<a href="${esc(urlOk(x.link))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.name)}</b></a>` : `<b>${esc(x.name)}</b>`}<br><span class="muted small">${esc(title(x.agency))}</span>` },
+      { h: "Where", f: (x) => esc([title(x.city), x.st].filter(Boolean).join(", ")) },
+      { h: "Ends", f: (x) => x.status === "Preview" ? `<span class="pill">Opens ${esc(shortDate(x.start))}</span>` : dueLabel(x.end + "T23:59:00") },
+      { h: "Bidders", num: 1, f: (x) => x.bidders ?? "" },
+      { h: "High bid", num: 1, f: (x) => usd0(x.bid) + (x.reserve && x.bid != null ? ' <span class="muted small" title="A reserve price applies">R</span>' : "") },
+      { h: "", f: (x) => x.veh ? `<button class="linkbtn" data-chk="${esc(x.name)}">Recalls</button>` : "" },
+    ], shown) : '<div class="state">No lots match. Untick "Cars and trucks only" or clear a filter.</div>';
+    $$("#auTbl [data-chk]").forEach((b) => b.addEventListener("click", () => {
+      const m = /^(\d{4})\s+(\S+)\s+([A-Za-z0-9-]+)/.exec(b.dataset.chk), f = $("#nhForm");
+      if (m) { f.elements.modelYear.value = m[1]; f.elements.make.value = m[2]; f.elements.model.value = m[3]; }
+      $("#nhPanel").scrollIntoView({ behavior: "smooth", block: "start" }); f.requestSubmit();
+    }));
+  };
+  draw(); $("#auFilters").addEventListener("submit", (e) => e.preventDefault());
+  $("#auQ").addEventListener("input", (e) => { au.q = e.target.value; draw(); });
+  $("#auSt").addEventListener("change", (e) => { au.st = e.target.value; draw(); });
+  $("#auWithin").addEventListener("change", (e) => { au.within = e.target.value; draw(); });
+  $("#auSort").addEventListener("change", (e) => { au.sort = e.target.value; draw(); });
+  $("#auVeh").addEventListener("change", (e) => { au.veh = e.target.checked; draw(); });
+}
+const mdy = (s) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ""); return m ? new Date(+m[3], +m[1] - 1, +m[2]) : null; };
+const dmy = (s) => { const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(s || ""); return m ? new Date(+m[3], +m[2] - 1, +m[1]) : null; };
+const dstr = (d) => d ? d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) : "";
+$("#nhForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#nhOut"), btn = $("#nhGo");
+  const args = { make: f.make.trim(), model: f.model.trim(), modelYear: String(f.modelYear).trim() };
+  btn.disabled = true; out.innerHTML = loading("Checking NHTSA…");
+  try {
+    const [rr, cc] = await Promise.allSettled([api("nhtsa_recalls", args), api("nhtsa_complaints", args)]);
+    if (rr.status === "rejected" && cc.status === "rejected") throw rr.reason;
+    const recalls = rr.status === "fulfilled" ? rr.value.data.recalls || [] : null, comps = cc.status === "fulfilled" ? cc.value.data.complaints || [] : null;
+    const crashes = comps ? comps.filter((c) => c.crash).length : 0, fires = comps ? comps.filter((c) => c.fire).length : 0;
+    const hurt = comps ? comps.reduce((n, c) => n + (c.numberOfInjuries || 0), 0) : 0, dead = comps ? comps.reduce((n, c) => n + (c.numberOfDeaths || 0), 0) : 0;
+    const comp = {}; (comps || []).forEach((c) => String(c.component || "Other").split(",").forEach((k) => { k = k.trim(); if (k) comp[k] = (comp[k] || 0) + 1; }));
+    const bars = Object.entries(comp).sort((a, b) => b[1] - a[1]).slice(0, 8).map(([k, v]) => ({ label: title(k), value: v, display: String(v) }));
+    out.innerHTML = `<p class="muted">Showing <b>${esc(args.modelYear)} ${esc(title(args.make))} ${esc(title(args.model))}</b>.</p>
+      <div class="kpis"><div class="kpi"><b>${recalls ? recalls.length : "n/a"}</b><span>recall campaigns</span></div><div class="kpi"><b>${comps ? comps.length.toLocaleString() : "n/a"}</b><span>owner complaints</span></div><div class="kpi"><b>${crashes}</b><span>reported crashes</span></div><div class="kpi"><b>${fires}</b><span>reported fires</span></div><div class="kpi"><b>${hurt} / ${dead}</b><span>injuries / deaths reported</span></div></div>
+      <div class="panel" style="margin-top:12px"><h2>Recalls</h2><div id="nhRecalls"></div></div>
+      <div class="grid2" style="margin-top:12px"><div class="panel"><h2>What owners complain about</h2><div id="nhBars"></div></div><div class="panel"><h2>Latest complaints</h2><div id="nhComps"></div></div></div>`;
+    $("#nhRecalls").innerHTML = recalls == null ? '<div class="state err">Could not load recalls.</div>' : !recalls.length ? '<div class="state">No recalls on file for this vehicle.</div>' : recalls.map((x) => `<div style="margin-bottom:14px">
+        <div class="row" style="justify-content:space-between"><b>${esc(title(x.component))}</b><span class="muted small">${esc(dstr(dmy(x.reportReceivedDate)))} · campaign ${esc(x.campaignNumber)}</span></div>
+        ${x.parkIt ? '<span class="pill warn">Do not drive</span> ' : ""}${x.parkOutside ? '<span class="pill warn">Park outside</span> ' : ""}${x.overTheAirUpdate ? '<span class="pill">Fixed by software update</span>' : ""}
+        <p style="margin:6px 0 4px">${esc(x.summary)}</p><p class="muted small" style="margin:0 0 4px"><b>Risk:</b> ${esc(x.consequence)}</p><p class="muted small" style="margin:0"><b>Fix:</b> ${esc(x.remedy)}</p></div>`).join("");
+    if (bars.length) barChart($("#nhBars"), bars); else $("#nhBars").innerHTML = '<div class="state">No complaints on file.</div>';
+    const latest = (comps || []).slice().sort((a, b) => (mdy(b.dateComplaintFiled) || 0) - (mdy(a.dateComplaintFiled) || 0)).slice(0, 12);
+    $("#nhComps").innerHTML = comps == null ? '<div class="state err">Could not load complaints.</div>' : latest.length ? table([
+      { h: "Filed", f: (x) => esc(dstr(mdy(x.dateComplaintFiled))) },
+      { h: "What happened", f: (x) => `${x.crash ? '<span class="pill warn">Crash</span> ' : ""}${x.fire ? '<span class="pill warn">Fire</span> ' : ""}<b>${esc(title(String(x.component || "").split(",")[0]))}</b><br><span class="muted small">${esc(String(x.summary || "").slice(0, 160))}${String(x.summary || "").length > 160 ? "…" : ""}</span>` },
+    ], latest) : '<div class="state">No complaints on file.</div>';
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+
+/* ---------- RULES AND POLICY ---------- */
+const isoDaysAgo = (n) => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);
+$("#rulesForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#rulesOut"), btn = $("#rulesGo"), q = f.q.trim();
+  btn.disabled = true;
+  out.innerHTML = `<div class="panel"><h2>Federal Register</h2><div id="rFr">${loading("Searching…")}</div></div>
+    <div class="panel" style="margin-top:12px"><h2>Open dockets on regulations.gov</h2><div id="rDk">${loading("Searching…")}</div></div>
+    <div class="panel" style="margin-top:12px"><h2>Code of Federal Regulations</h2><div id="rCfr">${loading("Searching…")}</div></div>`;
+  const since = f.since ? isoDaysAgo(+f.since) : "";
+  const job = (id, fn) => fn().catch((err) => { if (err.kind !== "auth") $(id).innerHTML = errBox(err); });
+  await Promise.all([
+    job("#rFr", async () => {
+      const d = (await api("fed_register_search_documents", clean({ query: q, type: f.type, publicationDateFrom: since, perPage: 15 }))).data, rows = d.documents || [];
+      $("#rFr").innerHTML = (rows.length ? `<p class="muted small" style="margin-top:-6px">${(d.totalRecords || rows.length).toLocaleString()} documents. Showing the first ${rows.length}.</p>` : "") + (rows.length ? table([
+        { h: "Document", f: (x) => `<a href="${esc(urlOk(x.htmlUrl))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(String(x.abstract || "").slice(0, 200))}${String(x.abstract || "").length > 200 ? "…" : ""}</span>` },
+        { h: "Type", f: (x) => `<span class="pill">${esc(x.typeDisplay || x.type)}</span>` },
+        { h: "Agency", f: (x) => esc((x.agencies || []).map((a) => a.name).slice(0, 2).join(", ")) },
+        { h: "Published", f: (x) => esc(x.publicationDate || "") },
+      ], rows) : '<div class="state">Nothing in the Federal Register matched. Try one word, or choose Any time.</div>');
+    }),
+    job("#rDk", async () => {
+      const rows = (await api("regulations_search_dockets", clean({ searchTerm: q, limit: 10, lastModifiedDateGe: since }))).data.dockets || [];
+      $("#rDk").innerHTML = rows.length ? table([
+        { h: "Docket", f: (x) => `<a href="https://www.regulations.gov/docket/${encodeURIComponent(x.docketId)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.docketId)}</span>` },
+        { h: "Agency", f: (x) => esc(x.agencyId || "") },
+        { h: "Type", f: (x) => esc(x.docketType || "") },
+        { h: "Last changed", f: (x) => esc(String(x.lastModifiedDate || "").slice(0, 10)) },
+      ], rows) : '<div class="state">No dockets matched.</div>';
+    }),
+    job("#rCfr", async () => {
+      const rows = ((await api("ecfr_search", clean({ query: q, titleNumber: f.title ? +f.title : "", perPage: 15 }))).data.results || []).filter((x) => !x.endsOn).slice(0, 10);
+      $("#rCfr").innerHTML = rows.length ? table([
+        { h: "Section", f: (x) => `<a href="${esc(urlOk(x.ecfrUrl))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.section ? "§ " + x.section : x.headingPath)}</b></a><br><span class="muted small">${esc(String(x.headingPath || "").replace(/\s+/g, " "))}</span>` },
+        { h: "Excerpt", f: (x) => `<span class="small">${esc(String(x.excerpt || "").slice(0, 260))}</span>` },
+      ], rows) : '<div class="state">No current CFR sections matched. Try another rule book.</div>';
+    }),
+  ]);
+  btn.disabled = false;
+});
+
 /* ---------- CALENDAR ---------- */
 $("#calDl").addEventListener("click", async (e) => {
   e.target.disabled = true; $("#calMsg").textContent = "Preparing…";
@@ -1658,7 +1884,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "rules", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();

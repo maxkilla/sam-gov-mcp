@@ -5,6 +5,7 @@ import { refreshWatched, purgeLocal } from "./local.js";
 import { rankTexts, categorizeTexts } from "./rank.js";
 import { grantPayload, searchGrants } from "./grants.js";
 import { buildIcs } from "./calendar.js";
+import { loadAuctions } from "./auctions.js";
 import { purgeRecompetes } from "./recompete.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -265,6 +266,8 @@ interface Env {
   DB?: D1Database;
   /** Optional: where the daily digest is sent (Slack, Discord, n8n or ntfy URL). Set as a Secret. */
   ALERT_WEBHOOK_URL?: string;
+  /** api.data.gov key; GSA Auctions needs it. Falls back to the shared DEMO_KEY. */
+  DATA_GOV_API_KEY?: string;
 }
 
 const DAILY_CRON = "0 14 * * *"; // keep in step with wrangler.toml
@@ -510,6 +513,15 @@ export default {
       const key = env.CACHE ? await env.CACHE.get("settings:calkey") : null;
       if (!key || key !== calM[1] || !env.DB) return new Response("Not found", { status: 404 });
       return new Response(await buildIcs(env.DB), { headers: { "content-type": "text/calendar; charset=utf-8", "cache-control": "private, max-age=900" } });
+    }
+
+    if (url.pathname === "/api/auctions" && req.method === "GET") {
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      try {
+        return json(await loadAuctions(env.CACHE, env.DATA_GOV_API_KEY?.trim() || undefined, url.searchParams.has("refresh")));
+      } catch (e: any) {
+        return json({ error: "GSA Auctions unavailable: " + String(e?.message || e) }, 502);
+      }
     }
 
     if (url.pathname === "/api/grants/agencies") {
