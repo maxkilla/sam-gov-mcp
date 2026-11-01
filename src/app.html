@@ -178,6 +178,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <button type="button" data-tab="pricing">Pricing</button>
         <button type="button" data-tab="far">FAR</button>
         <button type="button" data-tab="vehicles">Vehicles</button>
+        <button type="button" data-tab="cyber">Cybersecurity</button>
         <button type="button" data-tab="rules">Rules and policy</button>
         <button type="button" data-tab="vet">Vet a company</button>
       </div>
@@ -348,6 +349,50 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       </form>
     </div>
     <div id="nhOut" style="margin-top:16px"></div>
+  </section>
+
+  <!-- CYBER -->
+  <section id="tab-cyber" class="hidden">
+    <h1>Cybersecurity</h1>
+    <p class="lede">What is being exploited right now, how to look up any vulnerability, and the security controls that federal contracts and certifications are built on.</p>
+    <div class="panel">
+      <h2>Actively exploited vulnerabilities</h2>
+      <p class="muted small" style="margin-top:-6px">The CISA Known Exploited Vulnerabilities list. Newest first.</p>
+      <form class="filters" id="kevForm">
+        <label>Vendor<input name="vendor" placeholder="Microsoft"></label>
+        <label>Product<input name="product" placeholder="Exchange"></label>
+        <label>Added<select name="since"><option value="7">Last 7 days</option><option value="30" selected>Last 30 days</option><option value="90">Last 90 days</option><option value="365">Last year</option><option value="">Any time</option></select></label>
+        <label style="display:flex;flex-direction:row;align-items:center;gap:6px;align-self:end"><input type="checkbox" name="ransom" value="1"> Used by ransomware</label>
+        <div><button class="btn" type="submit" id="kevGo">Show</button></div>
+      </form>
+      <div id="kevOut" style="margin-top:10px"></div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2>Look up a vulnerability</h2>
+      <form class="filters" id="cveForm">
+        <label class="wide">CVE number or product<input name="q" required placeholder="CVE-2021-44228, or fortinet, apache struts"></label>
+        <label>Severity<select name="sev"><option value="">Any</option><option value="CRITICAL">Critical</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option></select></label>
+        <label>Published<select name="since"><option value="">Any time</option><option value="30">Last 30 days</option><option value="90">Last 90 days</option></select></label>
+        <label style="display:flex;flex-direction:row;align-items:center;gap:6px;align-self:end"><input type="checkbox" name="kev" value="1"> Exploited only</label>
+        <div><button class="btn" type="submit" id="cveGo">Look up</button></div>
+      </form>
+      <div id="cveOut" style="margin-top:10px"></div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2>Security controls (NIST SP 800-53)</h2>
+      <p class="muted small" style="margin-top:-6px">The requirements behind FedRAMP, CMMC and risk assessments. Enter a control number or a word.</p>
+      <form class="filters" id="ctlForm">
+        <label class="wide">Control or topic<input name="q" placeholder="AC-2, multi-factor, encryption"></label>
+        <label>Family<select id="ctlFam"></select></label>
+        <div><button class="btn" type="submit" id="ctlGo">Find controls</button></div>
+      </form>
+      <div id="ctlOut" style="margin-top:10px"></div>
+    </div>
+    <div class="panel" style="margin-top:16px">
+      <h2>Rules that apply to contractors</h2>
+      <p class="muted small" style="margin-top:-6px">Opens the Rules and policy search with the topic filled in.</p>
+      <div class="row"><button class="btn ghost" type="button" data-rule="Cybersecurity Maturity Model Certification" data-title="">CMMC</button><button class="btn ghost" type="button" data-rule="controlled unclassified information" data-title="48">Controlled unclassified information</button><button class="btn ghost" type="button" data-rule="safeguarding covered contractor information systems" data-title="48">Safeguarding contractor systems</button><button class="btn ghost" type="button" data-rule="FedRAMP cloud" data-title="">FedRAMP</button></div>
+    </div>
   </section>
 
   <!-- RULES -->
@@ -594,7 +639,7 @@ function setTab(t) {
   $$("nav [data-tab]").forEach((b) => { if (b.dataset.tab === t) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
   $$("nav .grp").forEach((g) => $(".grpbtn", g).classList.toggle("on", !!$('[data-tab="' + t + '"]', g)));
   closeMenus();
-  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "rules", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -602,6 +647,7 @@ function setTab(t) {
   if (t === "saved") loadSaved();
   if (t === "recompete") loadRecompete();
   if (t === "vehicles") loadAuctions();
+  if (t === "cyber") loadCyber();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 function closeMenus(focusBtn) {
@@ -1641,6 +1687,95 @@ $("#rulesForm").addEventListener("submit", async (e) => {
   btn.disabled = false;
 });
 
+/* ---------- CYBERSECURITY ---------- */
+const SEV = { CRITICAL: "warn", HIGH: "warn", MEDIUM: "", LOW: "" };
+const sevPill = (p) => p ? `<span class="pill ${SEV[p.baseSeverity] || ""}">${esc(title(p.baseSeverity))} ${p.baseScore}</span>` : '<span class="muted small">not scored</span>';
+let cyberLoaded = false;
+function loadCyber() { if (cyberLoaded) return; cyberLoaded = true; $("#kevForm").requestSubmit(); }
+$("#kevForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#kevOut"), btn = $("#kevGo");
+  btn.disabled = true; out.innerHTML = loading("Reading the CISA catalog…");
+  try {
+    const d = (await api("cisa_kev_lookup", clean({ vendorProject: f.vendor.trim(), product: f.product.trim(), addedSince: f.since ? isoDaysAgo(+f.since) : "", ransomwareOnly: f.ransom ? true : "", limit: 200 }))).data;
+    const rows = (d.matches || []).slice().sort((a, b) => String(b.dateAdded).localeCompare(String(a.dateAdded)));
+    out.innerHTML = `<p class="muted small">${rows.length.toLocaleString()} match${rows.length === 1 ? "" : "es"} of ${Number(d.count).toLocaleString()} known exploited vulnerabilities. Catalog released ${esc(String(d.dateReleased || "").slice(0, 10))}. Federal agencies must fix these by the due date, and contracts that touch federal systems often inherit that deadline.</p><div id="kevTbl"></div>`;
+    $("#kevTbl").innerHTML = rows.length ? table([
+      { h: "Vulnerability", f: (x) => `<a href="${esc(urlOk(x.nvdUrl))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.cveID)}</b></a><br><span class="muted small">${esc(x.vulnerabilityName || "")}</span>` },
+      { h: "Product", f: (x) => `${esc(x.vendorProject || "")}<br><span class="muted small">${esc(x.product || "")}</span>` },
+      { h: "Added", f: (x) => `<span style="white-space:nowrap">${esc(x.dateAdded || "")}</span>` },
+      { h: "Fix by", f: (x) => !x.dueDate ? "" : daysUntil(x.dueDate + "T23:59:00") < 0 ? `<span class="muted small" style="white-space:nowrap">was due ${esc(x.dueDate)}</span>` : dueLabel(x.dueDate + "T23:59:00") },
+      { h: "Ransomware", f: (x) => x.knownRansomwareCampaignUse === "Known" ? '<span class="pill warn">Used</span>' : '<span class="muted small">not known</span>' },
+    ], rows.slice(0, 100)) : '<div class="state">Nothing matched. Widen the time period or clear a filter.</div>';
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+$("#cveForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const f = Object.fromEntries(new FormData(e.target)), out = $("#cveOut"), btn = $("#cveGo"), q = f.q.trim();
+  const byId = /^CVE-\d{4}-\d{4,}$/i.test(q);
+  btn.disabled = true; out.innerHTML = loading("Searching the National Vulnerability Database…");
+  try {
+    const args = byId ? { cveId: q.toUpperCase() } : clean({ keyword: q, cvssV3Severity: f.sev, pubStartDate: f.since ? isoDaysAgo(+f.since) : "", pubEndDate: f.since ? isoDaysAgo(0) : "", kevOnly: f.kev ? true : "", resultsPerPage: 25 });
+    const rows = (await api("cve_lookup", args)).data.results || [];
+    if (!rows.length) { out.innerHTML = '<div class="state">No vulnerabilities matched. Check the CVE number, or try the product name on its own.</div>'; return; }
+    out.innerHTML = `<p class="muted small">${rows.length} result${rows.length === 1 ? "" : "s"}${byId ? "" : ", oldest first unless you pick a time period"}. Click one for the details.</p><div id="cveTbl"></div>`;
+    $("#cveTbl").innerHTML = table([
+      { h: "CVE", f: (x) => `<b>${esc(x.cveId)}</b>${x.kev ? ' <span class="pill warn">Exploited</span>' : ""}` },
+      { h: "Severity", f: (x) => sevPill(x.primaryCvss) },
+      { h: "Published", f: (x) => esc(String(x.published || "").slice(0, 10)) },
+      { h: "What it is", f: (x) => `<span class="small">${esc(String(x.description || "").slice(0, 200))}${String(x.description || "").length > 200 ? "…" : ""}</span>` },
+    ], rows, { onRow: 1 });
+    $$("#cveTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openCve(rows[+tr.dataset.i])));
+    if (byId) openCve(rows[0]);
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+});
+function openCve(x) {
+  const m = x.primaryCvss, vec = (x.cvssMetrics || []).find((c) => c.vectorString && c.version === (m && m.version));
+  openDrawer("Vulnerability", `<h1>${esc(x.cveId)}</h1><p>${sevPill(m)} ${x.kev ? '<span class="pill warn">On the CISA exploited list</span>' : '<span class="muted small">Not on the CISA exploited list. That does not mean it is safe.</span>'}</p>
+    <div class="panel"><dl class="facts">
+      <dt>Published</dt><dd>${esc(String(x.published || "").slice(0, 10))}</dd><dt>Last changed</dt><dd>${esc(String(x.lastModified || "").slice(0, 10))}</dd><dt>Status</dt><dd>${esc(x.vulnStatus || "")}${x.rejected ? " (rejected)" : ""}</dd>
+      ${vec ? `<dt>CVSS ${esc(vec.version)}</dt><dd><code>${esc(vec.vectorString)}</code></dd>` : ""}
+      ${(x.cwes || []).length ? `<dt>Weakness</dt><dd>${esc(x.cwes.join(", "))}</dd>` : ""}
+      ${x.kev && typeof x.kev === "object" && x.kev.dueDate ? `<dt>Federal fix-by date</dt><dd>${esc(x.kev.dueDate)}</dd>` : ""}
+    </dl><h3 style="margin-top:12px">Description</h3><p>${esc(x.description || "")}</p>
+    ${(x.references || []).length ? `<h3>Links</h3><ul>${x.references.slice(0, 8).map((r) => `<li><a href="${esc(urlOk(r.url))}" target="_blank" rel="noopener noreferrer">${esc(String(r.url).replace(/^https?:\/\//, "").slice(0, 70))}</a></li>`).join("")}</ul>` : ""}
+    <p class="muted small"><a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(x.cveId)}" target="_blank" rel="noopener noreferrer">Open on NVD</a></p></div>`);
+}
+const FAMILIES = { AC: "Access control", AT: "Awareness and training", AU: "Audit and accountability", CA: "Assessment and authorization", CM: "Configuration management", CP: "Contingency planning", IA: "Identification and authentication", IR: "Incident response", MA: "Maintenance", MP: "Media protection", PE: "Physical protection", PL: "Planning", PM: "Program management", PS: "Personnel security", PT: "PII processing", RA: "Risk assessment", SA: "System and services acquisition", SC: "System and communications protection", SI: "System and information integrity", SR: "Supply chain risk management" };
+$("#ctlFam").innerHTML = '<option value="">Any family</option>' + Object.entries(FAMILIES).map(([k, v]) => `<option value="${k}">${k} · ${v}</option>`).join("");
+async function runControls(q, fam) {
+  const out = $("#ctlOut"), btn = $("#ctlGo"); q = (q || "").trim();
+  btn.disabled = true; out.innerHTML = loading("Looking up controls…");
+  try {
+    const byId = /^[A-Za-z]{2}-\d{1,2}(\(\d+\))?$/.test(q);
+    const rows = (await api("nist_800_53_controls", clean({ controlId: byId ? q : "", keyword: byId ? "" : q, family: fam, limit: 25 }))).data.controls || [];
+    if (!rows.length) { out.innerHTML = '<div class="state">No controls matched. Try one keyword such as "encryption", or a control number like AC-2.</div>'; return; }
+    out.innerHTML = `<p class="muted small">${rows.length} control${rows.length === 1 ? "" : "s"}. These are the requirements behind FedRAMP, CMMC and RMF assessments.</p><div id="ctlTbl"></div>`;
+    $("#ctlTbl").innerHTML = table([
+      { h: "Control", f: (x) => `<b>${esc(x.id)}</b>${x.status ? ' <span class="pill">withdrawn</span>' : ""}` },
+      { h: "Name", f: (x) => esc(x.title) },
+      { h: "Family", f: (x) => esc(String(x.family || "").split(" — ")[1] || x.family || "") },
+    ], rows, { onRow: 1 });
+    $$("#ctlTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openControl(rows[+tr.dataset.i])));
+    if (byId && rows.length === 1) openControl(rows[0]);
+  } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
+  finally { btn.disabled = false; }
+}
+$("#ctlForm").addEventListener("submit", (e) => { e.preventDefault(); runControls($("#ctlForm [name=q]").value, $("#ctlFam").value); });
+function openControl(x) {
+  openDrawer("Security control", `<h1>${esc(x.id)} ${esc(x.title)}</h1><p class="muted">${esc(x.family || "")}</p><div class="panel">
+    ${x.status ? `<p><span class="pill">withdrawn</span> ${x.incorporatedInto && x.incorporatedInto.length ? "Folded into " + esc(x.incorporatedInto.join(", ")) + "." : ""}</p>` : ""}
+    ${x.statement ? `<h3>What it requires</h3><p style="white-space:pre-wrap">${esc(x.statement)}</p>` : ""}
+    ${x.guidance ? `<h3>Guidance</h3><p class="small" style="white-space:pre-wrap">${esc(x.guidance)}</p>` : ""}
+    ${(x.enhancements || []).length ? `<h3>Stronger versions of this control</h3><ul>${x.enhancements.map((n) => `<li><b>${esc(n.id)}</b> ${esc(n.title)}</li>`).join("")}</ul>` : ""}</div>`);
+}
+$$("[data-rule]").forEach((b) => b.addEventListener("click", () => {
+  const f = $("#rulesForm"); f.elements.q.value = b.dataset.rule; f.elements.type.value = ""; f.elements.since.value = ""; f.elements.title.value = b.dataset.title || "";
+  setTab("rules"); f.requestSubmit();
+}));
+
 /* ---------- CALENDAR ---------- */
 $("#calDl").addEventListener("click", async (e) => {
   e.target.disabled = true; $("#calMsg").textContent = "Preparing…";
@@ -1884,7 +2019,7 @@ function pickTool(name) {
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
   showApp();
-  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "rules", "vet", "tools"].includes(h)) setTab(h);
+  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
