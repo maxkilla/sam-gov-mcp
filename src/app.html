@@ -10,37 +10,40 @@
 <link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#edf0f3; --surface:#fff; --ink:#12202e; --muted:#5b6b7b; --line:#d5dbe2; --soft:#f5f7f9;
-  --accent:#1f6f8b; --accent-ink:#fff; --accent-soft:#d9eaf0; --bar:#1f6f8b; --bar-hot:#0b3d52;
+  --bg:#dfe7ea; --surface:#fff; --ink:#1b2b30; --muted:#5b7077; --line:#b9c7cc; --soft:#eef3f4; --hdr:#fff;
+  --accent:#1f6b5e; --accent-ink:#fff; --accent-soft:#d6ebe6; --bar:#2f7d6d; --bar-hot:#c0392b;
+  --u-crit:#c0392b; --u-warn:#d98c1f; --u-ok:#2f7d6d; --u-off:#8fa2a8;
   --warn:#8a5a00; --warn-bg:#fff1d6; --crit:#a32020; --crit-bg:#fde4e4; --ok:#1d6b3a; --ok-bg:#dff3e6;
-  --shadow:0 1px 2px rgba(18,32,46,.08);
+  --shadow:none;
 }
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
-  --bg:#0e1620; --surface:#16222f; --ink:#e6ecf2; --muted:#93a3b3; --line:#2a3a4a; --soft:#1b2a39;
-  --accent:#5bb3ce; --accent-ink:#06222c; --accent-soft:#1d3a47; --bar:#5bb3ce; --bar-hot:#a9dcec;
+  --bg:#16262b; --surface:#0f1c20; --ink:#e4ecee; --muted:#9fb6bb; --line:#2d4a52; --soft:#1b2f36; --hdr:#0f1c20;
+  --accent:#8fd3c4; --accent-ink:#0f1c20; --accent-soft:#24454b; --bar:#8fd3c4; --bar-hot:#e0452f;
+  --u-crit:#e0452f; --u-warn:#e9a03a; --u-ok:#3f9b89; --u-off:#4a6a72;
   --warn:#f0c36a; --warn-bg:#3a2d10; --crit:#ff9b9b; --crit-bg:#3d1b1b; --ok:#7fd6a0; --ok-bg:#16301f; --shadow:none;
 }}
 :root[data-theme="dark"]{
-  --bg:#0e1620; --surface:#16222f; --ink:#e6ecf2; --muted:#93a3b3; --line:#2a3a4a; --soft:#1b2a39;
-  --accent:#5bb3ce; --accent-ink:#06222c; --accent-soft:#1d3a47; --bar:#5bb3ce; --bar-hot:#a9dcec;
+  --bg:#16262b; --surface:#0f1c20; --ink:#e4ecee; --muted:#9fb6bb; --line:#2d4a52; --soft:#1b2f36; --hdr:#0f1c20;
+  --accent:#8fd3c4; --accent-ink:#0f1c20; --accent-soft:#24454b; --bar:#8fd3c4; --bar-hot:#e0452f;
+  --u-crit:#e0452f; --u-warn:#e9a03a; --u-ok:#3f9b89; --u-off:#4a6a72;
   --warn:#f0c36a; --warn-bg:#3a2d10; --crit:#ff9b9b; --crit-bg:#3d1b1b; --ok:#7fd6a0; --ok-bg:#16301f; --shadow:none;
 }
 *{box-sizing:border-box}
 html{color-scheme:light dark}
-body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "Public Sans",system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 "DejaVu Sans Condensed","Public Sans","Arial Narrow",system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums}
 button,input,select,textarea{font:inherit;color:inherit}
 a{color:var(--accent)}
 :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .wrap{max-width:1180px;margin:0 auto;padding:0 16px}
-header.top{background:var(--surface);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
+header.top{background:var(--hdr);border-bottom:2px solid var(--line);position:sticky;top:0;z-index:5}
 header.top .wrap{display:flex;align-items:center;gap:20px;min-height:54px;flex-wrap:wrap}
-.brand{font-weight:700;font-size:17px;letter-spacing:-.01em}
+.brand{font-weight:700;font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--accent)}
 nav{display:flex;gap:2px;flex:1;flex-wrap:wrap}
 nav .grp{position:relative}
 nav .grpbtn{background:none;border:0;padding:15px 12px 13px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent}
 nav .grpbtn[aria-haspopup]::after{content:"";display:inline-block;width:6px;height:6px;margin-left:7px;border:solid currentColor;border-width:0 2px 2px 0;transform:translateY(-3px) rotate(45deg)}
 nav .grpbtn.on,nav .grpbtn[aria-expanded="true"]{color:var(--ink)}
-nav .grpbtn.on{border-bottom-color:var(--accent)}
+nav .grpbtn.on{background:var(--soft);border-bottom-color:var(--accent)}
 nav .menu{position:absolute;top:calc(100% - 4px);left:0;min-width:200px;max-width:calc(100vw - 32px);background:var(--surface);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px rgba(18,32,46,.16);padding:4px;z-index:10}
 nav .menu[hidden]{display:none}
 nav .menu button{white-space:nowrap}
@@ -49,18 +52,48 @@ nav .menu button{display:flex;justify-content:space-between;align-items:center;g
 nav .menu button:hover,nav .menu button:focus-visible{background:var(--soft)}
 nav .menu button[aria-current="true"]{font-weight:700;color:var(--accent)}
 .cloud{display:flex;flex-wrap:wrap;gap:6px 8px;align-items:baseline;margin:0 0 10px}
-.cloud button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:99px;padding:2px 11px;cursor:pointer;line-height:1.4;font-weight:500}
+.cloud button{border:1px solid var(--line);background:var(--soft);color:var(--ink);border-radius:2px;padding:2px 11px;cursor:pointer;line-height:1.4;font-weight:500}
 .cloud button small{color:var(--muted);margin-left:5px;font-size:.72em;font-weight:600}
-.cloud button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:#fff}
+.cloud button[aria-pressed="true"]{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
 .cloud button[aria-pressed="true"] small{color:inherit}
 .cloud button.dim{color:var(--muted)}
 .linkbtn{background:none;border:0;color:var(--muted);cursor:pointer;padding:6px;text-decoration:underline}
+
+/* bid strips (dispatch board) */
+.top2{display:grid;grid-template-columns:1.6fr 1fr;gap:12px}
+@media (max-width:820px){.top2{grid-template-columns:1fr}}
+.cnt{color:var(--muted);font-size:12px;letter-spacing:.06em;text-transform:uppercase;margin:0 0 -4px}
+.strips{display:grid;gap:5px}
+div.strip.click{cursor:pointer}
+.strip{display:grid;grid-template-columns:66px minmax(0,1fr) auto;background:var(--surface);color:var(--ink);min-height:62px;border:1px solid var(--line);border-left:0;cursor:pointer;text-align:left;padding:0;width:100%;font:inherit}
+.strip.hasfit{grid-template-columns:66px minmax(0,1fr) auto 76px}
+.strip:hover{background:var(--soft)}
+.strip .dy{display:flex;flex-direction:column;align-items:center;justify-content:center;color:#fff;font:700 24px/1 "DejaVu Sans Mono",ui-monospace,monospace;background:var(--u-off)}
+.strip .dy small{font:600 9px/1 system-ui,sans-serif;letter-spacing:.12em;text-transform:uppercase;margin-top:3px}
+.strip.crit .dy{background:var(--u-crit)}.strip.warn .dy{background:var(--u-warn);color:#1b1306}.strip.ok .dy{background:var(--u-ok)}
+.strip .mid{padding:8px 14px;align-self:center;min-width:0}
+.strip .mid b{font-size:15px;display:block}
+.strip .mid span{color:var(--muted);font-size:12.5px}
+.strip .mid a{color:inherit}.strip .mid .act{display:block;margin-top:2px}.strip .mid .act .linkbtn{padding:2px 8px 2px 0;font-size:12.5px;color:var(--accent)}
+.strip dd select,.strip dd textarea{margin:0;font:inherit;font-size:13px;padding:4px 6px;min-height:0}.strip dd textarea{min-height:44px;white-space:normal;width:100%;resize:vertical}.strip dd{overflow:visible}
+.strip.edit dl div{justify-content:flex-start}
+.strip .dy.off{background:var(--u-off)}
+.strip dl{display:grid;grid-template-columns:84px 124px 140px;margin:0;border-left:1px dashed var(--line)}
+.strip dl div{padding:8px 12px;border-right:1px dashed var(--line);display:flex;flex-direction:column;justify-content:center;min-width:0}
+.strip dl div:last-child{border-right:0}
+.strip dt{font-size:9px;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+.strip dd{margin:2px 0 0;font:600 13px "DejaVu Sans Mono",ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.strip .ft{background:var(--soft);display:flex;flex-direction:column;align-items:center;justify-content:center;font:700 13px "DejaVu Sans Mono",ui-monospace,monospace}.strip .ft.strong{color:var(--ok)}.strip .ft.weak{color:var(--muted);font-weight:400}
+.strip .ft small{font:600 9px/1 system-ui,sans-serif;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-top:2px}
+@media (max-width:820px){.strip,.strip.hasfit{grid-template-columns:56px minmax(0,1fr)}.strip dl{display:none}.strip .ft{display:none}.strip .mid{padding:8px 10px}}
 main{padding:20px 0 64px}
 h1{font-size:22px;margin:0 0 4px;letter-spacing:-.01em}
 h2{font-size:16px;margin:0 0 10px}
 h3{font-size:14px;margin:0 0 6px}
 .lede{color:var(--muted);margin:0 0 16px;max-width:70ch}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:16px;box-shadow:var(--shadow)}
+.panel{background:var(--surface);border:1px solid var(--line);border-top:3px solid var(--line);border-radius:0;padding:12px 16px 14px;box-shadow:var(--shadow)}
+.panel>h2:first-child{font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);margin:0 0 8px}
+.panel>h2:first-child+p.muted{margin-top:-4px!important}
 .grid2{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 @media (max-width:820px){.grid2{grid-template-columns:1fr}}
 .stack>*+*{margin-top:16px}
@@ -68,15 +101,15 @@ form.filters{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr
 form.filters .wide{grid-column:span 2}
 @media (max-width:520px){form.filters .wide{grid-column:auto}}
 label{display:block;font-size:13px;color:var(--muted);font-weight:500}
-input,select,textarea{width:100%;margin-top:3px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+input,select,textarea{width:100%;margin-top:3px;padding:8px 10px;border:1px solid var(--line);border-radius:2px;background:var(--surface)}
 textarea{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;min-height:110px}
-.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:9px 16px;font-weight:600;cursor:pointer}
+.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:2px;padding:9px 16px;font-weight:600;cursor:pointer}
 .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
 .btn:disabled{opacity:.55;cursor:wait}
 .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
 .muted{color:var(--muted)}
 .small{font-size:13px}
-.pill{display:inline-flex;align-items:center;gap:5px;border-radius:99px;padding:1px 9px;font-size:12px;font-weight:600;background:var(--soft);border:1px solid var(--line)}
+.pill{display:inline-flex;align-items:center;gap:5px;border-radius:2px;padding:1px 9px;font-size:12px;font-weight:600;background:var(--soft);border:1px solid var(--line)}
 .pill.warn{background:var(--warn-bg);color:var(--warn);border-color:transparent}
 .pill.crit{background:var(--crit-bg);color:var(--crit);border-color:transparent}
 .pill.ok{background:var(--ok-bg);color:var(--ok);border-color:transparent}
@@ -567,9 +600,9 @@ function barChart(host, items, { click } = {}) {
 }
 
 /* column chart (SVG), pts: [{x,label,value,hot?}] ; axis labels sparse */
-function columnChart(host, pts, { unit = "", labelEvery = 1 } = {}) {
+function columnChart(host, pts, { unit = "", labelEvery = 1, height = 190 } = {}) {
   if (!pts.length) { host.innerHTML = '<div class="state">Nothing to chart for these filters.</div>'; return; }
-  const W = 640, H = 190, L = 30, B = 24, T = 8, R = 4;
+  const W = 640, H = height, L = 30, B = 24, T = 8, R = 4;
   const max = Math.max(...pts.map((p) => p.value)) || 1;
   const top = Math.ceil(max / Math.pow(10, Math.floor(Math.log10(max)))) * Math.pow(10, Math.floor(Math.log10(max)));
   const bw = (W - L - R) / pts.length, gap = Math.min(2, bw * .2);
@@ -578,7 +611,7 @@ function columnChart(host, pts, { unit = "", labelEvery = 1 } = {}) {
   [0, .5, 1].forEach((f) => { const v = top * f; svg += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 5}" y="${y(v) + 4}" text-anchor="end">${Math.round(v)}</text>`; });
   pts.forEach((p, i) => {
     const x = L + i * bw + gap / 2, h = (H - T - B) * (p.value / top);
-    if (p.value > 0) svg += `<rect data-i="${i}" x="${x}" y="${y(p.value)}" width="${Math.max(1, bw - gap)}" height="${h}" rx="2" fill="${p.hot ? "var(--bar-hot)" : "var(--bar)"}"/>`;
+    if (p.value > 0) svg += `<rect data-i="${i}" x="${x}" y="${y(p.value)}" width="${Math.max(1, bw - gap)}" height="${h}" rx="2" fill="${p.fill || (p.hot ? "var(--bar-hot)" : "var(--bar)")}"/>`;
     svg += `<rect data-i="${i}" x="${L + i * bw}" y="${T}" width="${bw}" height="${H - T - B}" fill="transparent"/>`;
     if (i % labelEvery === 0) svg += `<text x="${x + (bw - gap) / 2}" y="${H - 7}" text-anchor="middle">${esc(p.label)}</text>`;
   });
@@ -620,6 +653,38 @@ function table(cols, rows, { onRow } = {}) {
   if (!rows.length) return '<div class="state">No rows returned.</div>';
   return `<div class="tablewrap"><table><thead><tr>${cols.map((c) => `<th class="${c.num ? "num" : ""}">${esc(c.h)}</th>`).join("")}</tr></thead><tbody>${rows.map((r, i) => `<tr class="${onRow ? "click" : ""}" data-i="${i}">${cols.map((c) => `<td class="${c.num ? "num" : ""}">${c.f(r)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
 }
+
+
+/** Strip list shared by every tab. spec: {tab(x)->[cls,unit,num], mid(x)->{t,s,act?}, cells:[{h,f}], w:"84px 124px 140px", end:{h,f(x)}|null, onRow(x,i), cls?}
+ *  Returns HTML; call bindStrips(host, rows, spec) after inserting it. */
+function stripList(rows, spec) {
+  const cols = spec.w || spec.cells.map(() => "1fr").join(" ");
+  return '<div class="strips">' + rows.map((x, i) => {
+    const [cls, unit, num] = spec.tab(x), m = spec.mid(x), end = spec.end && spec.end.f(x);
+    return `<div class="strip ${cls || ""} ${end != null ? "hasfit" : ""} ${spec.onRow ? "click" : ""} ${spec.cls || ""}" data-i="${i}" ${spec.onRow ? 'role="button" tabindex="0"' : ""}>
+      <span class="dy ${cls ? "" : "off"}">${num || "—"}<small>${esc(unit || "")}</small></span>
+      <span class="mid"><b>${m.t}</b><span>${m.s || ""}</span>${m.act ? `<span class="act">${m.act}</span>` : ""}</span>
+      <dl style="grid-template-columns:${cols}">${spec.cells.map((c) => `<div><dt>${esc(c.h)}</dt><dd>${c.f(x)}</dd></div>`).join("")}</dl>
+      ${end != null ? `<span class="ft">${end}<small>${esc(spec.end.h)}</small></span>` : ""}
+    </div>`;
+  }).join("") + "</div>";
+}
+function bindStrips(host, rows, spec) {
+  if (!spec.onRow) return;
+  $$(".strip", host).forEach((el) => {
+    const go = (e) => { if (e.target.closest("a,button,select,textarea,input")) return; spec.onRow(rows[+el.dataset.i], +el.dataset.i); };
+    el.addEventListener("click", go);
+    el.addEventListener("keydown", (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === el) { e.preventDefault(); go(e); } });
+  });
+}
+/** Days-left tab: [color class, unit, number] from a date. */
+function dayTab(iso, none = "no date") {
+  const d = daysUntil(iso);
+  if (d == null) return ["", none, ""];
+  if (d < 0) return ["", "closed", "—"];
+  return [d <= 3 ? "crit" : d <= 7 ? "warn" : "ok", d === 1 ? "day" : "days", String(d)];
+}
+const fitCell = (f) => !f ? "—" : esc(title(f.fit));
 
 /* ---------- date helpers ---------- */
 const DAY = 864e5;
@@ -837,32 +902,29 @@ function renderBids() {
   const live = items.filter((i) => (daysUntil(i.responseDeadline) ?? 1) >= 0);
   const soon = live.filter((i) => { const d = daysUntil(i.responseDeadline); return d != null && d <= 7; }).length;
   out.innerHTML = `
-    <div class="panel"><div class="kpis">
-      <div class="kpi"><b>${bidState.total.toLocaleString()}</b><span>open notices match</span></div>
-      <div class="kpi"><b>${items.length}</b><span>loaded below</span></div>
-      <div class="kpi"><b>${soon}</b><span>due within 7 days</span></div>
-    </div></div>
-    <div class="grid2">
-      <div class="panel"><h2>When responses are due</h2><p class="muted small" style="margin-top:-6px">Notices per day, next 60 days. Dark bars are within a week.</p><div id="cDue"></div></div>
-      <div class="panel"><h2>Who is buying</h2><p class="muted small" style="margin-top:-6px">Notices by department.</p><div id="cAgency"></div></div>
+    <div class="top2">
+      <div class="panel"><h2>When responses are due</h2><p class="muted small">Notices per day, next 60 days. Red is within 3 days, amber within a week.</p><div id="cDue"></div></div>
+      <div class="panel"><h2>Who is buying</h2><p class="muted small">Notices by department.</p><div id="cAgency"></div></div>
     </div>
+    <div class="panel"><h2>Kind of work</h2><p class="muted small">Tap a kind to filter the notices below.</p><div id="catCloud"></div></div>
     <div class="grid2 ${bidState.enriched.size ? "" : "hidden"}" id="enrichCharts">
       <div class="panel"><h2>By NAICS</h2><div id="cNaics"></div></div>
       <div class="panel"><h2>By set-aside</h2><div id="cSet"></div></div>
     </div>
-    <div class="panel">
-      <div class="row" style="justify-content:space-between;margin-bottom:8px"><h2 style="margin:0">Notices</h2>
+    <div class="stack" style="--gap:8px">
+      <p class="cnt">${bidState.total.toLocaleString()} open notices match · ${items.length} loaded · ${soon} due within 7 days · ${bidState.fit ? "best fit first" : "soonest due first"}</p>
+      <div class="row" style="justify-content:space-between">
+        <label style="min-width:260px">Agency<select id="agencyFilter"></select></label>
         <span class="row"><button class="btn ghost" id="saveSearchBtn">Save this search</button><button class="btn ghost" id="fitBtn">Sort by fit</button><button class="btn ghost" id="enrichBtn">Add NAICS and set-aside to charts</button></span></div>
-      <form id="saveForm" class="row hidden" style="margin-bottom:8px"><label style="flex:1;min-width:200px">Name for this search<input name="name" required maxlength="80" placeholder="VA cybersecurity, Maryland"></label><button class="btn" type="submit" style="align-self:end">Save</button></form>
-      <div id="catCloud"></div>
-      <div class="row" style="margin-bottom:8px"><label style="min-width:260px">Agency<select id="agencyFilter"></select></label><span id="enrichMsg" class="muted small" aria-live="polite" style="align-self:end"></span></div>
+      <form id="saveForm" class="row hidden"><label style="flex:1;min-width:200px">Name for this search<input name="name" required maxlength="80" placeholder="VA cybersecurity, Maryland"></label><button class="btn" type="submit" style="align-self:end">Save</button></form>
+      <span id="enrichMsg" class="muted small" aria-live="polite"></span>
       <div id="bidTable"></div>
       ${items.length < bidState.total ? `<p><button class="btn ghost" id="moreBtn">Load 50 more</button></p>` : ""}
     </div>`;
   const today = new Date(); today.setHours(0, 0, 0, 0);
-  const pts = Array.from({ length: 60 }, (_, i) => { const dt = new Date(today.getTime() + i * DAY); return { label: i % 10 === 0 ? dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "", long: dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }), value: 0, hot: i <= 7 }; });
+  const pts = Array.from({ length: 60 }, (_, i) => { const dt = new Date(today.getTime() + i * DAY); return { label: i % 10 === 0 ? dt.toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "", long: dt.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" }), value: 0, hot: i <= 7, fill: i <= 3 ? "var(--u-crit)" : i <= 7 ? "var(--u-warn)" : "var(--u-ok)" }; });
   live.forEach((i) => { const d = new Date(i.responseDeadline); d.setHours(0, 0, 0, 0); const k = Math.round((d - today) / DAY); if (k >= 0 && k < 60) pts[k].value++; });
-  columnChart($("#cDue"), pts, { unit: "notices due" });
+  columnChart($("#cDue"), pts, { unit: "notices due", height: 140 });
   const by = {}; items.forEach((i) => { const k = title(String(i.agency || "Unknown").split(".")[0]); by[k] = (by[k] || 0) + 1; });
   const ranked = Object.entries(by).sort((a, b) => b[1] - a[1]); const topA = ranked.slice(0, 8), rest = ranked.slice(8).reduce((s, x) => s + x[1], 0);
   if (rest) topA.push(["Other", rest]);
@@ -879,16 +941,20 @@ function renderBids() {
   let shown = bidState.agency ? items.filter((i) => dept(i) === bidState.agency) : items;
   if (bidState.cat) shown = shown.filter((i) => CAT.get(i.noticeId) === bidState.cat);
   const fit = bidState.fit;
+  if (!fit) { const key = (x) => { const d = daysUntil(x.responseDeadline); return d == null ? 9e6 : d < 0 ? 1e7 - d : d; }; shown = shown.slice().sort((a, b) => key(a) - key(b)); }
   if (fit) shown = shown.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
-  $("#bidTable").innerHTML = table([
-    ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(x.noticeId)) }] : []),
-    { h: "Notice", f: (x) => `${bidState.newIds.has(x.noticeId) ? '<span class="pill ok">New</span> ' : ""}<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
-    { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
-    { h: "NAICS", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).naics || x.naics || "") },
-    { h: "Set-aside", f: (x) => esc((bidState.enriched.get(x.noticeId) || {}).setAside || x.setAside || "") },
-    { h: "Due", f: (x) => dueLabel(x.responseDeadline) },
-  ], shown, { onRow: 1 });
-  $$("#bidTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(shown[+tr.dataset.i])));
+  const urg = (iso) => { const d = daysUntil(iso); return d == null ? ["", "none", ""] : d < 0 ? ["", "closed", "—"] : [d <= 3 ? "crit" : d <= 7 ? "warn" : "ok", d === 0 ? "today" : d === 1 ? "day" : "days", d === 0 ? "0" : String(d)]; };
+  $("#bidTable").innerHTML = shown.length ? '<div class="strips">' + shown.map((x, i) => {
+    const [cls, unit, num] = urg(x.responseDeadline), en = bidState.enriched.get(x.noticeId) || {}, p = String(x.agency || "").split("."), f = fit && fit.get(x.noticeId);
+    const kind = CAT.get(x.noticeId);
+    return `<button type="button" class="strip ${cls} ${fit ? "hasfit" : ""}" data-i="${i}">
+      <span class="dy">${num || "—"}<small>${unit}</small></span>
+      <span class="mid"><b>${bidState.newIds.has(x.noticeId) ? '<span class="pill ok">New</span> ' : ""}${esc(x.title)}</b><span>${esc(title(p[0] || "Agency not listed"))}${p[1] ? " · " + esc(title(p[1])) : ""}${kind ? " · " + esc(kind) : ""}</span></span>
+      <dl><div><dt>NAICS</dt><dd>${esc(en.naics || x.naics || "—")}</dd></div><div><dt>Set-aside</dt><dd>${esc(en.setAside || x.setAside || "—")}</dd></div><div><dt>Solicitation</dt><dd title="${esc(x.solicitationNumber || "")}">${esc(x.solicitationNumber || "—")}</dd></div></dl>
+      ${fit ? `<span class="ft ${f ? f.fit : ""}">${f ? esc(title(f.fit)) : "—"}<small>fit</small></span>` : ""}
+    </button>`;
+  }).join("") + "</div>" : '<div class="state">No notices match these filters.</div>';
+  $$("#bidTable .strip").forEach((b) => b.addEventListener("click", () => openNotice(shown[+b.dataset.i])));
   }
   $("#moreBtn")?.addEventListener("click", (e) => { e.target.disabled = true; searchBids(items.length); });
   $("#enrichBtn").addEventListener("click", enrich);
@@ -985,15 +1051,12 @@ function drawGrants() {
     let rows = items.filter((g) => (!q || (g.title + " " + g.number).toLowerCase().includes(q)) && (!w || (w === "none" ? !g.close : (() => { const d = daysUntil(g.close); return d != null && d >= 0 && d <= +w; })())));
     if (fit) rows = rows.slice().sort((a, b) => ((fit.get(String(b.id)) || {}).score ?? -1) - ((fit.get(String(a.id)) || {}).score ?? -1));
     $("#gMsg").textContent = rows.length === items.length ? "" : `${rows.length} of ${items.length} shown`;
-    $("#gTable").innerHTML = rows.length ? table([
-      ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(String(x.id))) }] : []),
-      { h: "Opportunity", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.number || "")}${x.cfda && x.cfda.length ? " · listing " + esc(x.cfda.join(", ")) : ""}</span>` },
-      { h: "Agency", f: (x) => esc(x.agency || x.agencyCode || "") },
-      { h: "Posted", f: (x) => x.open ? esc(new Date(x.open).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })) : "" },
-      { h: "Status", f: (x) => `<span class="pill ${x.status === "posted" ? "ok" : ""}">${esc(G_STATUS[x.status] || x.status || "")}</span>` },
-      { h: "Closes", f: (x) => x.close ? dueLabel(x.close) : '<span class="muted">not set</span>' },
-    ], rows, { onRow: 1 }) : '<div class="state">Nothing loaded matches these filters. Clear them, or load more.</div>';
-    document.querySelectorAll("#gTable tbody tr").forEach((tr) => tr.addEventListener("click", () => openGrant(rows[+tr.dataset.i])));
+    const gspec = { w: "130px 110px 120px", tab: (x) => dayTab(x.close, "no close date"),
+      mid: (x) => ({ t: esc(x.title), s: esc(x.agency || x.agencyCode || "") + (x.number ? " · " + esc(x.number) : "") + (x.cfda && x.cfda.length ? " · listing " + esc(x.cfda.join(", ")) : "") }),
+      cells: [{ h: "Posted", f: (x) => x.open ? esc(new Date(x.open).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })) : "—" }, { h: "Status", f: (x) => esc(G_STATUS[x.status] || x.status || "—") }, { h: "Closes", f: (x) => x.close ? esc(new Date(x.close).toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "not set" }],
+      end: fit ? { h: "fit", f: (x) => fitCell(fit.get(String(x.id))) } : null, onRow: (x) => openGrant(x) };
+    $("#gTable").innerHTML = rows.length ? stripList(rows, gspec) : '<div class="state">Nothing loaded matches these filters. Clear them, or load more.</div>';
+    bindStrips($("#gTable"), rows, gspec);
   };
   draw();
   $("#gSave").addEventListener("click", async (e) => {
@@ -1320,12 +1383,10 @@ function drawLocal(run) {
   const draw = () => {
     const q = $("#slFilter").value.trim().toLowerCase(), g = $("#slGov").value;
     const rows = run.items.filter((x) => (!g || x.gov === g) && (!slCat || CAT.get(x.id) === slCat) && (!q || (x.title + " " + x.number + " " + x.text + " " + x.gov).toLowerCase().includes(q))).sort((a, b) => (a.due ? new Date(a.due).getTime() : 9e15) - (b.due ? new Date(b.due).getTime() : 9e15));
-    $("#slTbl").innerHTML = rows.length ? table([
-      { h: "Solicitation", f: (x) => `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer"><b>${esc(x.title)}</b></a><br><span class="muted small">${esc(x.number)}${x.type ? " · " + esc(x.type) : ""}</span>` },
-      { h: "Government", f: (x) => `${esc(x.gov)}<br><span class="pill">${esc(x.src)}</span>` },
-      { h: "Closes", f: (x) => x.due ? dueLabel(x.due) : '<span class="muted">see portal</span>' },
-      { h: "", f: (x) => `<button class="linkbtn" data-track="${esc(x.id)}">Track</button>` },
-    ], rows) : '<div class="state">No open solicitations match. Clear the filter to see everything found.</div>';
+    const lspec = { w: "150px 120px 110px", tab: (x) => dayTab(x.due, "see portal"),
+      mid: (x) => ({ t: `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<a href="${esc(x.link)}" target="_blank" rel="noopener noreferrer">${esc(x.title)}</a>`, s: esc(x.gov) + (CAT.get(x.id) ? " · " + esc(CAT.get(x.id)) : ""), act: `<button class="linkbtn" data-track="${esc(x.id)}">Track</button>` }),
+      cells: [{ h: "Solicitation", f: (x) => esc(x.number || "—") }, { h: "Type", f: (x) => esc(x.type || "—") }, { h: "Portal", f: (x) => esc(x.src || "—") }] };
+    $("#slTbl").innerHTML = rows.length ? stripList(rows, lspec) : '<div class="state">No open solicitations match. Clear the filter to see everything found.</div>';
     $$("[data-track]", $("#slTbl")).forEach((b) => b.addEventListener("click", async () => {
       const x = rows.find((r) => r.id === b.dataset.track);
       try { await store("PUT", "pipeline/local-" + x.id, { title: x.title, agency: x.gov, due: x.due, uiLink: x.link, status: "watching" }); b.textContent = "Added"; b.disabled = true; $("#slMsg").textContent = "Added to the Pipeline tab."; }
@@ -1419,12 +1480,17 @@ async function loadPipeline() {
   try {
     const { items } = await store("GET", "pipeline");
     if (!items.length) { out.innerHTML = '<div class="state">Nothing tracked yet. Open a notice on the Bids tab and choose Add to pipeline.</div>'; return; }
-    out.innerHTML = `<div class="grid2"><div class="panel"><h2>By status</h2><div id="pipeChart"></div></div><div class="panel"><h2>Due soonest</h2><div id="pipeSoon"></div></div></div><div class="panel" style="margin-top:16px"><div class="tablewrap"><table id="pipeTable"><thead><tr><th>Notice</th><th>Due</th><th>Status</th><th>Notes</th><th></th></tr></thead><tbody>${items.map((x) => `<tr data-id="${esc(x.notice_id)}"><td><b>${esc(x.title)}</b><br><span class="muted small">${esc(title(String(x.agency || "").split(".")[0]))}${x.naics ? " · NAICS " + esc(x.naics) : ""}</span> ${x.ui_link ? `<a class="small" href="${esc(x.ui_link)}" target="_blank" rel="noopener noreferrer">SAM.gov</a>` : ""}</td><td>${dueLabel(x.due)}</td><td><select class="st" aria-label="Status">${STATUS.map(([v, l]) => `<option value="${v}" ${v === x.status ? "selected" : ""}>${l}</option>`).join("")}</select></td><td style="min-width:220px"><textarea class="nt" aria-label="Notes" style="min-height:54px;margin:0">${esc(x.notes)}</textarea></td><td><button class="linkbtn rm">Remove</button></td></tr>`).join("")}</tbody></table></div></div>`;
+    out.innerHTML = `<div class="grid2"><div class="panel"><h2>By status</h2><div id="pipeChart"></div></div><div class="panel"><h2>Due soonest</h2><div id="pipeSoon"></div></div></div><div id="pipeTable" style="margin-top:16px"></div>`;
+    const pspec = { w: "150px 260px 80px", cls: "edit", tab: (x) => dayTab(x.due),
+      mid: (x) => ({ t: esc(x.title), s: esc(title(String(x.agency || "").split(".")[0])) + (x.naics ? " · NAICS " + esc(x.naics) : ""), act: (x.ui_link ? `<a class="small" href="${esc(x.ui_link)}" target="_blank" rel="noopener noreferrer">Open</a> ` : "") + '<button class="linkbtn rm">Remove</button>' }),
+      cells: [{ h: "Status", f: (x) => `<select class="st" aria-label="Status">${STATUS.map(([v, l]) => `<option value="${v}" ${v === x.status ? "selected" : ""}>${l}</option>`).join("")}</select>` }, { h: "Notes", f: (x) => `<textarea class="nt" aria-label="Notes">${esc(x.notes)}</textarea>` }, { h: "Due", f: (x) => x.due ? esc(new Date(x.due).toLocaleDateString(undefined, { month: "short", day: "numeric" })) : "—" }] };
+    $("#pipeTable").innerHTML = stripList(items, pspec);
+    $$("#pipeTable .strip").forEach((el) => el.setAttribute("data-id", items[+el.dataset.i].notice_id));
     const counts = {}; items.forEach((x) => counts[x.status] = (counts[x.status] || 0) + 1);
     barChart($("#pipeChart"), STATUS.filter(([v]) => counts[v]).map(([v, l]) => ({ label: l, value: counts[v] })));
     const soon = items.filter((x) => x.due && daysUntil(x.due) >= 0 && !["won", "lost", "passed"].includes(x.status)).sort((a, b) => new Date(a.due) - new Date(b.due)).slice(0, 5);
     $("#pipeSoon").innerHTML = soon.length ? soon.map((x) => `<div class="row" style="justify-content:space-between;margin-bottom:6px"><span>${esc(x.title.slice(0, 48))}</span>${dueLabel(x.due)}</div>`).join("") : '<div class="state">No open deadlines.</div>';
-    $$("#pipeTable tbody tr").forEach((tr) => {
+    $$("#pipeTable .strip").forEach((tr) => {
       const x = items.find((i) => i.notice_id === tr.dataset.id);
       const save = (extra) => store("PUT", "pipeline/" + x.notice_id, { title: x.title, status: $(".st", tr).value, notes: $(".nt", tr).value, ...extra }).catch((e) => { if (e.kind !== "auth") alert("Could not save: " + e.message); });
       $(".st", tr).addEventListener("change", () => save().then(loadPipeline));
@@ -1591,14 +1657,10 @@ function drawAuctions() {
     rows = rows.slice().sort(by[au.sort]);
     const shown = rows.slice(0, 150);
     $("#auNote").textContent = `${rows.length} lot${rows.length === 1 ? "" : "s"}${rows.length > shown.length ? ", showing the first " + shown.length : ""}. Updated ${new Date(au.at).toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}${au.stale ? " (GSA could not be reached, so this may be out of date)" : ""}. Condition, VIN and inspection details are on each GSA page.`;
-    $("#auTbl").innerHTML = shown.length ? table([
-      { h: "Item", f: (x) => `${x.link ? `<a href="${esc(urlOk(x.link))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.name)}</b></a>` : `<b>${esc(x.name)}</b>`}<br><span class="muted small">${esc(title(x.agency))}</span>` },
-      { h: "Where", f: (x) => esc([title(x.city), x.st].filter(Boolean).join(", ")) },
-      { h: "Ends", f: (x) => x.status === "Preview" ? `<span class="pill">Opens ${esc(shortDate(x.start))}</span>` : dueLabel(x.end + "T23:59:00") },
-      { h: "Bidders", num: 1, f: (x) => x.bidders ?? "" },
-      { h: "High bid", num: 1, f: (x) => usd0(x.bid) + (x.reserve && x.bid != null ? ' <span class="muted small" title="A reserve price applies">R</span>' : "") },
-      { h: "", f: (x) => x.veh ? `<button class="linkbtn" data-chk="${esc(x.name)}">Recalls</button>` : "" },
-    ], shown) : '<div class="state">No lots match. Untick "Cars and trucks only" or clear a filter.</div>';
+    const aspec = { w: "130px 80px 110px", tab: (x) => x.status === "Preview" ? ["", "opens " + shortDate(x.start), ""] : dayTab(x.end + "T23:59:00"),
+      mid: (x) => ({ t: x.link ? `<a href="${esc(urlOk(x.link))}" target="_blank" rel="noopener noreferrer">${esc(x.name)}</a>` : esc(x.name), s: esc(title(x.agency)), act: x.veh ? `<button class="linkbtn" data-chk="${esc(x.name)}">Check recalls</button>` : "" }),
+      cells: [{ h: "Where", f: (x) => esc([title(x.city), x.st].filter(Boolean).join(", ") || "—") }, { h: "Bidders", f: (x) => esc(String(x.bidders ?? "—")) }, { h: "High bid", f: (x) => esc(usd0(x.bid)) + (x.reserve && x.bid != null ? ' <span class="muted" title="A reserve price applies">R</span>' : "") }] };
+    $("#auTbl").innerHTML = shown.length ? stripList(shown, aspec) : '<div class="state">No lots match. Untick "Cars and trucks only" or clear a filter.</div>';
     $$("#auTbl [data-chk]").forEach((b) => b.addEventListener("click", () => {
       const m = /^(\d{4})\s+(\S+)\s+([A-Za-z0-9-]+)/.exec(b.dataset.chk), f = $("#nhForm");
       if (m) { f.elements.modelYear.value = m[1]; f.elements.make.value = m[2]; f.elements.model.value = m[3]; }
@@ -1700,13 +1762,10 @@ $("#kevForm").addEventListener("submit", async (e) => {
     const d = (await api("cisa_kev_lookup", clean({ vendorProject: f.vendor.trim(), product: f.product.trim(), addedSince: f.since ? isoDaysAgo(+f.since) : "", ransomwareOnly: f.ransom ? true : "", limit: 200 }))).data;
     const rows = (d.matches || []).slice().sort((a, b) => String(b.dateAdded).localeCompare(String(a.dateAdded)));
     out.innerHTML = `<p class="muted small">${rows.length.toLocaleString()} match${rows.length === 1 ? "" : "es"} of ${Number(d.count).toLocaleString()} known exploited vulnerabilities. Catalog released ${esc(String(d.dateReleased || "").slice(0, 10))}. Federal agencies must fix these by the due date, and contracts that touch federal systems often inherit that deadline.</p><div id="kevTbl"></div>`;
-    $("#kevTbl").innerHTML = rows.length ? table([
-      { h: "Vulnerability", f: (x) => `<a href="${esc(urlOk(x.nvdUrl))}" target="_blank" rel="noopener noreferrer"><b>${esc(x.cveID)}</b></a><br><span class="muted small">${esc(x.vulnerabilityName || "")}</span>` },
-      { h: "Product", f: (x) => `${esc(x.vendorProject || "")}<br><span class="muted small">${esc(x.product || "")}</span>` },
-      { h: "Added", f: (x) => `<span style="white-space:nowrap">${esc(x.dateAdded || "")}</span>` },
-      { h: "Fix by", f: (x) => !x.dueDate ? "" : daysUntil(x.dueDate + "T23:59:00") < 0 ? `<span class="muted small" style="white-space:nowrap">was due ${esc(x.dueDate)}</span>` : dueLabel(x.dueDate + "T23:59:00") },
-      { h: "Ransomware", f: (x) => x.knownRansomwareCampaignUse === "Known" ? '<span class="pill warn">Used</span>' : '<span class="muted small">not known</span>' },
-    ], rows.slice(0, 100)) : '<div class="state">Nothing matched. Widen the time period or clear a filter.</div>';
+    const kspec = { w: "150px 100px 110px", tab: (x) => x.dueDate ? dayTab(x.dueDate + "T23:59:00", "no due date") : ["", "no due date", ""],
+      mid: (x) => ({ t: `<a href="${esc(urlOk(x.nvdUrl))}" target="_blank" rel="noopener noreferrer">${esc(x.cveID)}</a> ${esc(x.vulnerabilityName || "")}`, s: x.knownRansomwareCampaignUse === "Known" ? '<span class="pill warn">Used by ransomware</span>' : "" }),
+      cells: [{ h: "Vendor", f: (x) => esc(x.vendorProject || "—") }, { h: "Product", f: (x) => esc(x.product || "—") }, { h: "Added", f: (x) => esc(x.dateAdded || "—") }] };
+    $("#kevTbl").innerHTML = rows.length ? stripList(rows.slice(0, 100), kspec) : '<div class="state">Nothing matched. Widen the time period or clear a filter.</div>';
   } catch (err) { if (err.kind !== "auth") out.innerHTML = errBox(err); }
   finally { btn.disabled = false; }
 });
@@ -1834,15 +1893,11 @@ function drawRecompete() {
     let rows = rc.items.filter((x) => new Date(x.endDate).getTime() <= limit && (!q || `${x.incumbent} ${x.description} ${x.agency} ${x.subAgency}`.toLowerCase().includes(q)));
     if (rc.fit) rows = rows.slice().sort((a, b) => ((rc.fit.get(String(b.id)) || {}).score ?? -1) - ((rc.fit.get(String(a.id)) || {}).score ?? -1));
     $("#rcCount").textContent = `${rows.length} contract${rows.length === 1 ? "" : "s"}`;
-    $("#rcTable").innerHTML = !rc.watches.length ? '<div class="state">Add what you want to watch above. The first scan takes up to a minute.</div>' : rows.length ? table([
-      ...(rc.fit ? [{ h: "Fit", f: (x) => fitPill(rc.fit.get(String(x.id))) }] : []),
-      { h: "Contract", f: (x) => `${x.isNew ? '<span class="pill ok">New</span> ' : ""}<b>${esc(String(x.description || (x.subAgency || x.agency || "Federal") + " contract").slice(0, 110))}</b><br><span class="muted small">${esc(x.id)}${x.naics ? " · NAICS " + esc(x.naics) : ""}</span>` },
-      { h: "Incumbent", f: (x) => x.incumbent ? `<a href="#" data-vet="${esc(x.incumbent)}">${esc(title(x.incumbent))}</a>` : "" },
-      { h: "Buyer", f: (x) => esc(x.subAgency || x.agency || "") },
-      { h: "Value", num: 1, f: (x) => money(x.amount) },
-      { h: "Ends", f: (x) => `${esc(x.endDate)} <span class="muted small">(${daysUntil(x.endDate)}d)</span>` },
-      { h: "", f: (x) => x.internalId ? `<button class="linkbtn" data-inc="${esc(x.internalId)}">Analyze</button>` : "" },
-    ], rows) : '<div class="state">Nothing ends in that window. Try a longer window, or widen what you watch.</div>';
+    const rspec = { w: "190px 150px 90px", tab: (x) => dayTab(x.endDate + "T23:59:00"),
+      mid: (x) => ({ t: `${x.isNew ? '<span class="pill ok">New</span> ' : ""}${esc(String(x.description || (x.subAgency || x.agency || "Federal") + " contract").slice(0, 110))}`, s: esc(x.id) + (x.naics ? " · NAICS " + esc(x.naics) : "") + " · ends " + esc(x.endDate), act: x.internalId ? `<button class="linkbtn" data-inc="${esc(x.internalId)}">Analyze incumbent</button>` : "" }),
+      cells: [{ h: "Incumbent", f: (x) => x.incumbent ? `<a href="#" data-vet="${esc(x.incumbent)}">${esc(title(x.incumbent))}</a>` : "—" }, { h: "Buyer", f: (x) => esc(x.subAgency || x.agency || "—") }, { h: "Value", f: (x) => esc(money(x.amount)) }],
+      end: rc.fit ? { h: "fit", f: (x) => fitCell(rc.fit.get(String(x.id))) } : null };
+    $("#rcTable").innerHTML = !rc.watches.length ? '<div class="state">Add what you want to watch above. The first scan takes up to a minute.</div>' : rows.length ? stripList(rows, rspec) : '<div class="state">Nothing ends in that window. Try a longer window, or widen what you watch.</div>';
     document.querySelectorAll("#rcTable a[data-vet]").forEach((a) => a.addEventListener("click", (e) => { e.preventDefault(); openVet(a.dataset.vet); }));
     document.querySelectorAll("#rcTable [data-inc]").forEach((b) => b.addEventListener("click", () => { openDrawer("Incumbent", '<div id="rcInc"></div>'); analyzeIncumbent($("#rcInc"), b.dataset.inc); }));
   };
@@ -1940,15 +1995,12 @@ function drawEarly(all, total, fit) {
   if (fit) rows = rows.slice().sort((a, b) => ((fit.get(b.noticeId) || {}).score ?? -1) - ((fit.get(a.noticeId) || {}).score ?? -1));
   if (earlyCat) rows = rows.filter((x) => CAT.get(x.noticeId) === earlyCat);
   out.innerHTML = `<div id="earlyCloud"></div><div class="row" style="margin-bottom:8px"><span class="muted small">Showing ${rows.length}${total > all.length ? " of " + total : ""}. ${fit ? "Best fit first." : "Sources sought come first, then presolicitations."} Select a row for details.</span> <button class="btn ghost" id="earlyFit" type="button">${fit ? "Edit your focus" : "Sort by fit"}</button> <span id="earlyMsg" class="small muted" aria-live="polite"></span></div><div class="panel" id="earlyTbl"></div>`;
-  $("#earlyTbl").innerHTML = table([
-    ...(fit ? [{ h: "Fit", f: (x) => fitPill(fit.get(x.noticeId)) }] : []),
-    { h: "Type", f: (x) => `<span class="pill${x.noticeTypeCode === "r" ? " ok" : ""}">${esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "")}</span>` },
-    { h: "Notice", f: (x) => `<b>${esc(x.title)}</b><br><span class="muted small">${esc(x.solicitationNumber || "")}</span>` },
-    { h: "Agency", f: (x) => { const p = String(x.agency || "").split("."); return esc(title(p[0])) + (p[1] ? `<br><span class="muted small">${esc(title(p[1]))}</span>` : ""); } },
-    { h: "Posted", f: (x) => esc(String(x.postedDate || "").slice(0, 10)) },
-    { h: "Respond by", f: (x) => x.responseDeadline ? dueLabel(x.responseDeadline) : '<span class="muted">no date</span>' },
-  ], rows, { onRow: 1 });
-  $$("#earlyTbl tbody tr").forEach((tr) => tr.addEventListener("click", () => openNotice(rows[+tr.dataset.i])));
+  const espec = { w: "130px 130px 120px", tab: (x) => dayTab(x.responseDeadline),
+    mid: (x) => { const p = String(x.agency || "").split("."); return { t: esc(x.title), s: esc(title(p[0])) + (p[1] ? " · " + esc(title(p[1])) : "") + (CAT.get(x.noticeId) ? " · " + esc(CAT.get(x.noticeId)) : "") }; },
+    cells: [{ h: "Type", f: (x) => esc(EARLY_LABEL[x.noticeTypeCode] || x.noticeType || "—") }, { h: "Posted", f: (x) => esc(String(x.postedDate || "").slice(0, 10) || "—") }, { h: "Solicitation", f: (x) => esc(x.solicitationNumber || "—") }],
+    end: fit ? { h: "fit", f: (x) => fitCell(fit.get(x.noticeId)) } : null, onRow: (x) => openNotice(x) };
+  $("#earlyTbl").innerHTML = rows.length ? stripList(rows, espec) : '<div class="state">No notices match. Widen the search or clear the kind of work.</div>';
+  bindStrips($("#earlyTbl"), rows, espec);
   $("#earlyFit").addEventListener("click", async (e) => {
     if (fit) { editFocus(() => drawEarly(all, total, null) || $("#earlyFit").click()); return; }
     const b = e.target; b.disabled = true; $("#earlyMsg").textContent = "Ranking…";
