@@ -112,3 +112,12 @@ curl -s localhost:8787/mcp -H 'authorization: Bearer dev-token' \
   extraction, big paginated pulls) may need the paid plan.
 - For defense in depth, put the route behind Cloudflare Access (service token) in addition
   to the bearer token.
+
+## Facebook Marketplace tools
+
+Two extra tools, always loaded, defined in `src/facebook.ts`:
+
+- `facebook_marketplace_search` — `query`, `location` ("Lakeport, CA"), `radius` (miles), `minPrice`, `maxPrice`, `limit`, `showSold`.
+- `facebook_marketplace_listing` — `listingId` (numeric id or item URL): description, photos, seller, delivery options.
+
+Adapted from [jlsookiki/secondhand-mcp](https://github.com/jlsookiki/secondhand-mcp) (MIT). No login. It uses Facebook's internal query ids, so it can break without notice; update the `*_DOC_ID` constants if searches start failing. If Facebook refuses the Worker's IP, calls retry through the relay (`www.facebook.com` is allowed in `relay/index.ts`; redeploy that function).

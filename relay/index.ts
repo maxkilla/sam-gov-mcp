@@ -3,7 +3,7 @@
 // Usage: {FUNCTION_URL}/{host}/{path}?{query}  with header x-relay-token: <RELAY_TOKEN>
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
-const ALLOWED = new Set(["api.usaspending.gov", "sanctionslistservice.ofac.treas.gov"]);
+const ALLOWED = new Set(["api.usaspending.gov", "sanctionslistservice.ofac.treas.gov", "www.facebook.com"]);
 const SKIP_REQ = new Set(["host", "x-relay-token", "authorization", "apikey", "cookie", "content-length", "connection"]);
 const SKIP_RES = new Set(["content-encoding", "content-length", "transfer-encoding", "connection", "set-cookie"]);
 

@@ -6,6 +6,7 @@ import { rankTexts, categorizeTexts } from "./rank.js";
 import { grantPayload, searchGrants } from "./grants.js";
 import { buildIcs } from "./calendar.js";
 import { loadAuctions } from "./auctions.js";
+import { FB_TOOLS, fbSearch, fbListing } from "./facebook.js";
 import { purgeRecompetes } from "./recompete.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
@@ -337,6 +338,18 @@ async function runEnvelope(
   return store ? cacheALS.run(store, exec) : exec();
 }
 
+/** Facebook Marketplace tools (src/facebook.ts): same {ok,data} / {ok:false,error} envelope as the other tools. */
+async function runFacebook(name: string, args: unknown): Promise<{ envelope: Record<string, unknown>; isError: boolean }> {
+  const fbEnv = { relay: relayCfg };
+  try {
+    const a: any = args ?? {};
+    const data = name === "facebook_marketplace_search" ? await fbSearch(fbEnv, a) : await fbListing(fbEnv, a.listingId);
+    return { envelope: { ok: true, data }, isError: false };
+  } catch (err) {
+    return { envelope: { ok: false, error: { message: err instanceof Error ? err.message : String(err), tool: name } }, isError: true };
+  }
+}
+
 function buildServer(
   env: Env,
   toolsetParam: string | null,
@@ -376,12 +389,15 @@ function buildServer(
   );
 
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: filterToolsFor(TOOLS, loaded).map((t: any) => ({
-      name: t.name,
-      description: t.description,
-      inputSchema: zodToJsonSchema(t.inputSchema),
-      annotations: toolAnnotations(t.name),
-    })),
+    tools: [
+      ...filterToolsFor(TOOLS, loaded).map((t: any) => ({
+        name: t.name,
+        description: t.description,
+        inputSchema: zodToJsonSchema(t.inputSchema),
+        annotations: toolAnnotations(t.name),
+      })),
+      ...FB_TOOLS.map((t) => ({ ...t, annotations: { readOnlyHint: true, openWorldHint: true } })),
+    ],
   }));
 
   server.setRequestHandler(ListResourcesRequestSchema, async () => ({
@@ -413,6 +429,10 @@ function buildServer(
 
   server.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { name, arguments: args } = req.params;
+    if (FB_TOOLS.some((t) => t.name === name)) {
+      const { envelope, isError } = await runFacebook(name, args);
+      return { content: [{ type: "text", text: JSON.stringify(envelope, null, 2) }], ...(isError ? { isError: true } : {}) };
+    }
     if (TOOLS.some((t: any) => t.name === name) && !loaded.has(name)) {
       return {
         content: [
@@ -556,11 +576,10 @@ export default {
       if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
       if (url.pathname === "/api/tools") {
         return json({
-          tools: TOOLS.map((t: any) => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: zodToJsonSchema(t.inputSchema),
-          })),
+          tools: [
+            ...TOOLS.map((t: any) => ({ name: t.name, description: t.description, inputSchema: zodToJsonSchema(t.inputSchema) })),
+            ...FB_TOOLS,
+          ],
         });
       }
       if (req.method !== "POST") return json({ error: "POST required" }, 405);
@@ -571,6 +590,7 @@ export default {
         return json({ error: "invalid JSON body" }, 400);
       }
       const name = typeof body?.name === "string" ? body.name : "";
+      if (FB_TOOLS.some((t) => t.name === name)) return json((await runFacebook(name, body?.args)).envelope, 200);
       if (!TOOLS.some((t: any) => t.name === name)) return json({ error: `unknown tool '${name}'` }, 404);
       const cache = cacheFor(env, ctx, { off: url.searchParams.get("cache") === "off", refresh: body?.refresh === true });
       const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
