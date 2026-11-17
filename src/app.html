@@ -207,8 +207,6 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
 .doctext{white-space:pre-wrap;word-break:break-word;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px}mark{background:var(--warn-bg);color:inherit;border-radius:2px}textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit}
 
 /* business profile band */
-#bizBar{padding-top:14px}
-#bizBar .panel{margin-bottom:0}
 #bizForm{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
 #bizForm label{flex:1 1 240px;font-size:12px;font-weight:600;color:var(--muted)}
 #bizForm input{text-transform:uppercase;letter-spacing:.08em;font-family:ui-monospace,Menlo,Consolas,monospace}
@@ -293,23 +291,12 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <button type="button" data-tab="vet">Vet a company</button>
       </div>
     </div>
+    <div class="grp"><button class="grpbtn" type="button" data-tab="business">My business</button></div>
     <div class="grp"><button class="grpbtn" type="button" data-tab="tools">All tools</button></div>
   </nav>
   <button class="linkbtn" id="signout">Sign out</button>
 </div></header>
 
-<section class="wrap" id="bizBar" aria-label="Business profile">
-  <div class="panel">
-    <h2>Your business</h2>
-    <form id="bizForm" autocomplete="off">
-      <label>SAM UEI<input name="uei" maxlength="14" placeholder="12-character UEI" aria-describedby="bizMsg" spellcheck="false"></label>
-      <button class="btn" type="submit">Look up</button>
-      <button class="btn ghost" type="button" id="bizClear" hidden>Clear</button>
-    </form>
-    <div id="bizMsg" class="small muted" aria-live="polite" style="margin-top:6px"></div>
-    <div id="bizOut"></div>
-  </div>
-</section>
 
 
 <main class="wrap">
@@ -579,6 +566,21 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
     <div id="mktOut" style="margin-top:16px"></div>
   </section>
 
+  <!-- MY BUSINESS -->
+  <section id="tab-business" class="hidden">
+    <h1>My business</h1>
+    <p class="lede">Enter your SAM UEI to see your registration, certifications, screening results and federal award history in one place. It is saved, so it is here next time.</p>
+    <div class="panel">
+      <form id="bizForm" autocomplete="off">
+        <label>SAM UEI<input name="uei" maxlength="14" placeholder="12-character UEI" aria-describedby="bizMsg" spellcheck="false"></label>
+        <button class="btn" type="submit">Look up</button>
+        <button class="btn ghost" type="button" id="bizClear" hidden>Clear</button>
+      </form>
+      <div id="bizMsg" class="small muted" aria-live="polite" style="margin-top:6px"></div>
+      <div id="bizOut"></div>
+    </div>
+  </section>
+
   <!-- VET -->
   <section id="tab-vet" class="hidden">
     <h1>Vet a company</h1>
@@ -655,7 +657,7 @@ $("#loginForm").addEventListener("submit", async (e) => {
   if (!r.ok) { $("#loginErr").textContent = "That token was not accepted."; return; }
   TOKEN = t;
   try { ($("#remember").checked ? localStorage : sessionStorage).setItem("bd_token", t); } catch {}
-  $("#tokenIn").value = ""; showApp(); bizInit();
+  $("#tokenIn").value = ""; showApp();
 });
 $("#signout").addEventListener("click", () => {
   TOKEN = ""; try { localStorage.removeItem("bd_token"); sessionStorage.removeItem("bd_token"); } catch {}
@@ -796,7 +798,7 @@ function setTab(t) {
   $$("nav [data-tab]").forEach((b) => { if (b.dataset.tab === t) b.setAttribute("aria-current", "true"); else b.removeAttribute("aria-current"); });
   $$("nav .grp").forEach((g) => $(".grpbtn", g).classList.toggle("on", !!$('[data-tab="' + t + '"]', g)));
   closeMenus();
-  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
+  ["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "business", "tools"].forEach((n) => $("#tab-" + n).classList.toggle("hidden", n !== t));
   if (t === "tools") loadTools();
   if (t === "market") loadAgencies();
   if (t === "grants") loadGrantAgencies();
@@ -805,6 +807,7 @@ function setTab(t) {
   if (t === "recompete") loadRecompete();
   if (t === "vehicles") loadAuctions();
   if (t === "cyber") loadCyber();
+  if (t === "business") bizInit();
   try { history.replaceState(null, "", "#" + t); } catch {}
 }
 function closeMenus(focusBtn) {
@@ -2213,7 +2216,8 @@ async function bizLoad(uei, save) {
     out.innerHTML = bizRender(d);
   } catch (e) { out.innerHTML = errBox(e); }
 }
-function bizInit() { bizLoad("", false); }
+let bizReady = false;
+function bizInit() { if (bizReady) return; bizReady = true; bizLoad("", false); }
 $("#bizForm").addEventListener("submit", (e) => { e.preventDefault(); bizLoad($("#bizForm").elements.uei.value.trim().toUpperCase().replace(/\s+/g, ""), true); });
 $("#bizClear").addEventListener("click", async () => {
   await fetch("/api/entity", { method: "DELETE", headers: { authorization: "Bearer " + TOKEN } }).catch(() => {});
@@ -2225,15 +2229,15 @@ $("#bizClear").addEventListener("click", async () => {
   if (!TOKEN) return showLogin("");
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
-  showApp(); bizInit();
-  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "tools"].includes(h)) setTab(h);
+  showApp();
+  const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "business", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
 })();
 
 /* nav icons (decorative) */
 (function(){
-  var M={"bids": "search", "early": "eye", "grants": "gift", "recompete": "repeat", "local": "pin", "auctions": "bag", "kev": "shield", "pipeline": "list", "saved": "mark", "market": "chart", "pricing": "dollar", "far": "book", "vehicles": "truck", "cyber": "shield", "rules": "scale", "vet": "check", "tools": "tools"}, G=["target","mark","book"];
+  var M={"bids": "search", "early": "eye", "grants": "gift", "recompete": "repeat", "local": "pin", "auctions": "bag", "kev": "shield", "pipeline": "list", "saved": "mark", "market": "chart", "pricing": "dollar", "far": "book", "vehicles": "truck", "cyber": "shield", "rules": "scale", "vet": "check", "business": "target", "tools": "tools"}, G=["target","mark","book"];
   function ic(n){return '<svg class="ic" aria-hidden="true"><use href="#ic-'+n+'"/></svg>';}
   document.querySelectorAll("nav .menu button[data-tab],nav .grpbtn[data-tab]").forEach(function(b){var n=M[b.dataset.tab];if(n)b.insertAdjacentHTML("afterbegin",ic(n));});
   document.querySelectorAll("nav .grp").forEach(function(g,i){var b=g.querySelector(".grpbtn[aria-haspopup]");if(b&&G[i])b.insertAdjacentHTML("afterbegin",ic(G[i]));});
