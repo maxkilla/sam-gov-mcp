@@ -205,6 +205,20 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
 .hidden{display:none!important}
 .rng{position:relative;height:14px;margin:14px 0 6px}.rngbar{position:absolute;inset:5px 0;border-radius:4px;background:var(--bar,#2a6f8f);opacity:.35}.rngmid{position:absolute;top:0;width:3px;height:14px;margin-left:-1px;border-radius:2px;background:var(--bar,#2a6f8f)}
 .doctext{white-space:pre-wrap;word-break:break-word;font:12.5px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;background:var(--soft);border:1px solid var(--line);border-radius:6px;padding:12px}mark{background:var(--warn-bg);color:inherit;border-radius:2px}textarea{width:100%;font:inherit;padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:inherit}
+
+/* business profile band */
+#bizBar{padding-top:14px}
+#bizBar .panel{margin-bottom:0}
+#bizForm{display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap}
+#bizForm label{flex:1 1 240px;font-size:12px;font-weight:600;color:var(--muted)}
+#bizForm input{text-transform:uppercase;letter-spacing:.08em;font-family:ui-monospace,Menlo,Consolas,monospace}
+.biz-head{display:flex;gap:10px 16px;align-items:baseline;flex-wrap:wrap;margin:12px 0 4px}
+.biz-head h2{margin:0;font-size:20px}
+.biz-facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:8px 18px;margin:10px 0}
+.biz-facts div{min-width:0}.biz-facts dt{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}.biz-facts dd{margin:1px 0 0;overflow-wrap:anywhere}
+.biz-chips{display:flex;flex-wrap:wrap;gap:5px;margin:4px 0 8px}
+.biz-chips .pill.pri{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.biz-sec{margin-top:10px}.biz-sec>b{font-size:11px;letter-spacing:.1em;text-transform:uppercase;color:var(--accent);display:block;margin-bottom:4px}
 </style>
 </head>
 <body>
@@ -283,6 +297,20 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
   </nav>
   <button class="linkbtn" id="signout">Sign out</button>
 </div></header>
+
+<section class="wrap" id="bizBar" aria-label="Business profile">
+  <div class="panel">
+    <h2>Your business</h2>
+    <form id="bizForm" autocomplete="off">
+      <label>SAM UEI<input name="uei" maxlength="14" placeholder="12-character UEI" aria-describedby="bizMsg" spellcheck="false"></label>
+      <button class="btn" type="submit">Look up</button>
+      <button class="btn ghost" type="button" id="bizClear" hidden>Clear</button>
+    </form>
+    <div id="bizMsg" class="small muted" aria-live="polite" style="margin-top:6px"></div>
+    <div id="bizOut"></div>
+  </div>
+</section>
+
 
 <main class="wrap">
   <!-- BIDS -->
@@ -627,7 +655,7 @@ $("#loginForm").addEventListener("submit", async (e) => {
   if (!r.ok) { $("#loginErr").textContent = "That token was not accepted."; return; }
   TOKEN = t;
   try { ($("#remember").checked ? localStorage : sessionStorage).setItem("bd_token", t); } catch {}
-  $("#tokenIn").value = ""; showApp();
+  $("#tokenIn").value = ""; showApp(); bizInit();
 });
 $("#signout").addEventListener("click", () => {
   TOKEN = ""; try { localStorage.removeItem("bd_token"); sessionStorage.removeItem("bd_token"); } catch {}
@@ -2129,12 +2157,75 @@ function pickTool(name) {
   });
 }
 
+/* ---------- BUSINESS PROFILE (UEI lookup) ---------- */
+const UEI_OK = /^[A-Z0-9]{12}$/;
+function bizRender(d) {
+  const reg = d.registration || {}, us = d.usaspending || {}, ex = d.exclusions || {}, of = d.ofac || {};
+  const pill = (cls, t) => `<span class="pill ${cls}">${t}</span>`;
+  const days = reg.expires ? Math.ceil((new Date(reg.expires) - Date.now()) / 864e5) : null;
+  let status = "";
+  if (reg.ok) {
+    const act = String(reg.status || "").toLowerCase() === "active";
+    status = pill(act ? "ok" : "crit", (act ? "✓ " : "✕ ") + esc(reg.status || "Unknown")) + (days != null ? " " + pill(days < 0 ? "crit" : days < 60 ? "warn" : "", days < 0 ? "expired " + -days + " days ago" : "renew in " + days + " days") : "");
+  }
+  const regNote = reg.ok ? "" : ({
+    no_key: "Registration details (status, expiry, NAICS, certifications) need the SAM_GOV_API_KEY secret on the Worker.",
+    key_rejected: "SAM.gov rejected the API key, so registration details are not shown.",
+    rate_limited: "SAM.gov is rate limiting the API key. Try again shortly.",
+    not_found: "SAM.gov has no registration under this UEI. Check the number, or whether the registration has lapsed or is still pending.",
+  }[reg.error] || "Registration details are unavailable: " + (reg.error || "unknown error"));
+  const fact = (k, v) => v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : "";
+  const name = d.name || (us.found ? us.name : null);
+  const fmt = (x) => x ? esc(String(x).slice(0, 10)) : "";
+  const chips = (arr, pri) => arr.length ? `<div class="biz-chips">${arr.map((c) => `<span class="pill${pri && c.primary ? " pri" : ""}" title="${esc(c.title || "")}">${esc(c.label)}</span>`).join("")}</div>` : "";
+  const naics = (reg.naics || []).map((n) => ({ label: n.code + (n.primary ? " · primary" : ""), title: n.name, primary: n.primary }));
+  const certs = (reg.sbaCerts || []).map((c) => ({ label: c.name }));
+  const types = ((reg.ok ? reg.businessTypes : us.businessTypes) || []).map((t) => ({ label: t }));
+  const exPill = !ex.ok ? pill("warn", "⚠ not checked") : ex.excluded ? pill("crit", `✕ ${ex.activeCount} active exclusion${ex.activeCount === 1 ? "" : "s"}`) : pill("ok", "✓ no active exclusions");
+  const ofPill = !of.ok ? pill("warn", "⚠ " + (of.error === "no_name" ? "needs a name" : "not checked")) : of.result === "no_name_match" ? pill("ok", "✓ no OFAC name match") : pill("crit", `✕ ${of.matchCount} possible OFAC match${of.matchCount === 1 ? "" : "es"}`);
+  const awards = us.ok && us.found && us.awards?.length ? table([{ h: "Recent award", f: (x) => `${esc(x.description || x.id)}<br><span class="muted small">${esc(x.id)}</span>` }, { h: "Buyer", f: (x) => esc(x.agency || "") }, { h: "Value", num: 1, f: (x) => money(x.amount) }], us.awards) : "";
+  const usLine = !us.ok ? `<p class="muted small">Federal award history is unavailable: ${esc(us.error || "")}</p>`
+    : us.found ? `<p class="small">${us.totalAmount != null ? "<b>" + money(us.totalAmount) + "</b> in federal awards" : "Federal awards on record"}${us.totalTransactions != null ? " across " + us.totalTransactions + " transactions" : ""}${us.parent ? " · parent: " + esc(us.parent) : ""}.</p>`
+    : '<p class="muted small">No federal awards on record for this UEI yet. That is normal for a new registrant.</p>';
+  return `<div class="biz-head"><h2>${esc(name || "UEI " + d.uei)}</h2>${status}</div>
+    ${reg.dba ? `<div class="muted small">DBA ${esc(reg.dba)}</div>` : ""}
+    ${regNote ? `<p class="${reg.error === "not_found" ? "" : "muted "}small" role="note">${esc(regNote)}</p>` : ""}
+    <dl class="biz-facts">${fact("UEI", esc(d.uei))}${fact("CAGE", esc(reg.cage))}${fact("Registered", fmt(reg.activeDate))}${fact("Expires", fmt(reg.expires))}${fact("In business since", fmt(reg.startDate))}${fact("Location", esc(reg.address))}${fact("Registered for", esc(reg.purpose))}${fact("Website", reg.website ? `<a href="${esc(/^https?:\/\//i.test(reg.website) ? reg.website : "https://" + reg.website)}" target="_blank" rel="noopener noreferrer">${esc(reg.website)}</a>` : "")}</dl>
+    ${naics.length ? `<div class="biz-sec"><b>NAICS codes</b>${chips(naics, true)}</div>` : ""}
+    ${certs.length ? `<div class="biz-sec"><b>SBA certifications</b>${chips(certs)}</div>` : ""}
+    ${types.length ? `<div class="biz-sec"><b>Business types</b>${chips(types)}</div>` : ""}
+    <div class="biz-sec"><b>Screening</b><div class="biz-chips">${exPill}${ofPill}</div>${ex.fapiisUrl ? `<a class="small" href="${esc(ex.fapiisUrl)}" target="_blank" rel="noopener noreferrer">FAPIIS record on SAM.gov</a>` : ""}</div>
+    <div class="biz-sec"><b>Federal award history</b>${usLine}${awards}</div>
+    <p class="muted small">Checked ${esc(new Date(d.checkedAt).toLocaleString())}. Screening is a name and UEI search, not a determination of responsibility.</p>`;
+}
+async function bizLoad(uei, save) {
+  const out = $("#bizOut"), msg = $("#bizMsg");
+  msg.textContent = "";
+  if (uei && !UEI_OK.test(uei)) { msg.textContent = "A UEI is 12 letters and numbers."; return; }
+  if (uei || out.innerHTML === "") out.innerHTML = loading("Looking up your registration…");
+  try {
+    const r = await fetch("/api/entity" + (uei ? "?uei=" + encodeURIComponent(uei) + (save ? "&save=1" : "") : ""), { headers: { authorization: "Bearer " + TOKEN } });
+    if (r.status === 401) { showLogin("That token was not accepted."); return; }
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) { out.innerHTML = ""; msg.textContent = d.error || "Lookup failed (" + r.status + ")."; return; }
+    if (!d.uei) { out.innerHTML = ""; $("#bizClear").hidden = true; return; }
+    $("#bizForm").elements.uei.value = d.uei; $("#bizClear").hidden = false;
+    out.innerHTML = bizRender(d);
+  } catch (e) { out.innerHTML = errBox(e); }
+}
+function bizInit() { bizLoad("", false); }
+$("#bizForm").addEventListener("submit", (e) => { e.preventDefault(); bizLoad($("#bizForm").elements.uei.value.trim().toUpperCase().replace(/\s+/g, ""), true); });
+$("#bizClear").addEventListener("click", async () => {
+  await fetch("/api/entity", { method: "DELETE", headers: { authorization: "Bearer " + TOKEN } }).catch(() => {});
+  $("#bizForm").elements.uei.value = ""; $("#bizOut").innerHTML = ""; $("#bizMsg").textContent = ""; $("#bizClear").hidden = true;
+});
+
 /* ---------- boot ---------- */
 (async () => {
   if (!TOKEN) return showLogin("");
   const r = await fetch("/api/tools", { method: "HEAD", headers: { authorization: "Bearer " + TOKEN } }).catch(() => null);
   if (r && r.status === 401) return showLogin("Your saved token no longer works. Enter the current one.");
-  showApp();
+  showApp(); bizInit();
   const h = (location.hash || "").slice(1); if (["bids", "early", "pipeline", "saved", "grants", "recompete", "pricing", "far", "local", "market", "vehicles", "cyber", "rules", "vet", "tools"].includes(h)) setTab(h);
   refreshBadge();
 })();
