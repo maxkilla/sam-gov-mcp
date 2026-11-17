@@ -8,6 +8,7 @@ import { buildIcs } from "./calendar.js";
 import { loadAuctions } from "./auctions.js";
 import { purgeRecompetes } from "./recompete.js";
 import { runDailyAlerts, collectDue, sendWebhook, digestText } from "./alerts.js";
+import { loadEntity, normalizeUei, UEI_RE } from "./entity.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import {
@@ -589,6 +590,26 @@ export default {
         if (text) await env.CACHE.put("settings:profile", text); else await env.CACHE.delete("settings:profile");
         return json({ ok: true });
       }
+    }
+
+    if (url.pathname === "/api/entity") {
+      // Business profile for a UEI. With no ?uei= it uses the one saved for this dashboard (KV, so it follows you across devices).
+      if (!authorized(req, env)) return json({ error: "unauthorized" }, 401);
+      if (req.method === "DELETE") {
+        if (env.CACHE) await env.CACHE.delete("settings:uei");
+        return json({ ok: true });
+      }
+      if (req.method !== "GET") return json({ error: "GET or DELETE required" }, 405);
+      const given = url.searchParams.get("uei");
+      const uei = normalizeUei(given || (env.CACHE ? await env.CACHE.get("settings:uei") : "") || "");
+      if (!uei) return json({ uei: null });
+      if (!UEI_RE.test(uei)) return json({ error: "A UEI is 12 letters and numbers." }, 400);
+      const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
+      const cache = cacheFor(env, ctx, { off: url.searchParams.get("cache") === "off" });
+      const run = async (name: string, args: Record<string, unknown>) => (await runEnvelope(sam, name, args, cache)).envelope;
+      const profile = await loadEntity(uei, env.SAM_GOV_API_KEY?.trim() || undefined, run);
+      if (given && url.searchParams.get("save") === "1" && env.CACHE) await env.CACHE.put("settings:uei", uei);
+      return json(profile);
     }
 
     if (url.pathname === "/api/rank" && req.method === "POST") {
