@@ -14,6 +14,12 @@ npx wrangler secret put SAM_GOV_API_KEY     # optional, only for the key-gated t
 npx wrangler deploy
 ```
 
+The **My business** tab shows registration details for your UEI. With `SAM_GOV_API_KEY` set they come live from
+SAM.gov and are cached for 6 hours (the Refresh button skips the cache). Without a key, or when the key is rejected or
+out of daily quota, it falls back to a keyless mirror of SAM.gov's public monthly Entity Registration extract, hosted by
+Pipeworx (up to about a month old). That sends your UEI to `gateway.pipeworx.io`; set the plain variable
+`ENTITY_FALLBACK=off` to disable it.
+
 Optional keys use the same pattern: `FRED_API_KEY`, `CENSUS_API_KEY`, `BEA_API_KEY`,
 `DOL_API_KEY`, `DATA_GOV_API_KEY`.
 

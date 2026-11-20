@@ -277,6 +277,7 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
       <div class="menu" hidden>
         <button type="button" data-tab="pipeline">Pipeline</button>
         <button type="button" data-tab="saved">Saved searches <span id="savedBadge" class="pill warn hidden"></span></button>
+        <button type="button" data-tab="business">My business</button>
       </div>
     </div>
     <div class="grp">
@@ -291,7 +292,6 @@ pre.out{background:var(--soft);border:1px solid var(--line);border-radius:6px;pa
         <button type="button" data-tab="vet">Vet a company</button>
       </div>
     </div>
-    <div class="grp"><button class="grpbtn" type="button" data-tab="business">My business</button></div>
     <div class="grp"><button class="grpbtn" type="button" data-tab="tools">All tools</button></div>
   </nav>
   <button class="linkbtn" id="signout">Sign out</button>
@@ -2176,7 +2176,11 @@ function bizRender(d) {
     key_rejected: "SAM.gov rejected the API key, so registration details are not shown.",
     rate_limited: "SAM.gov is rate limiting the API key. Try again shortly.",
     not_found: "SAM.gov has no registration under this UEI. Check the number, or whether the registration has lapsed or is still pending.",
+    snapshot_miss: "This UEI is not in SAM.gov's public monthly extract. A registration newer than the last snapshot will not appear there, and the Worker has no SAM API key for a live check. Add SAM_GOV_API_KEY, or check the number.",
   }[reg.error] || "Registration details are unavailable: " + (reg.error || "unknown error"));
+  const why = { no_key: "this Worker has no SAM API key", key_rejected: "SAM.gov rejected the API key", rate_limited: "the SAM API key is out of calls for today" }[reg.liveError] || "live SAM.gov data was unavailable";
+  const snapAge = reg.source === "mirror" && reg.snapshotDate ? Math.max(0, Math.round((Date.now() - new Date(reg.snapshotDate)) / 864e5)) : null;
+  const mirrorNote = reg.ok && reg.source === "mirror" ? `<p class="muted small" role="note">Registration details are from SAM.gov's public monthly extract${reg.snapshotDate ? " (snapshot " + esc(reg.snapshotDate) + (snapAge != null ? ", " + snapAge + " days old" : "") + ")" : ""} because ${why}. Anything that changed since then is not shown. Add SAM_GOV_API_KEY for live data.</p>` : "";
   const fact = (k, v) => v ? `<div><dt>${k}</dt><dd>${v}</dd></div>` : "";
   const name = d.name || (us.found ? us.name : null);
   const fmt = (x) => x ? esc(String(x).slice(0, 10)) : "";
@@ -2193,27 +2197,31 @@ function bizRender(d) {
   return `<div class="biz-head"><h2>${esc(name || "UEI " + d.uei)}</h2>${status}</div>
     ${reg.dba ? `<div class="muted small">DBA ${esc(reg.dba)}</div>` : ""}
     ${regNote ? `<p class="${reg.error === "not_found" ? "" : "muted "}small" role="note">${esc(regNote)}</p>` : ""}
+    ${mirrorNote}
     <dl class="biz-facts">${fact("UEI", esc(d.uei))}${fact("CAGE", esc(reg.cage))}${fact("Registered", fmt(reg.activeDate))}${fact("Expires", fmt(reg.expires))}${fact("In business since", fmt(reg.startDate))}${fact("Location", esc(reg.address))}${fact("Registered for", esc(reg.purpose))}${fact("Website", reg.website ? `<a href="${esc(/^https?:\/\//i.test(reg.website) ? reg.website : "https://" + reg.website)}" target="_blank" rel="noopener noreferrer">${esc(reg.website)}</a>` : "")}</dl>
     ${naics.length ? `<div class="biz-sec"><b>NAICS codes</b>${chips(naics, true)}</div>` : ""}
     ${certs.length ? `<div class="biz-sec"><b>SBA certifications</b>${chips(certs)}</div>` : ""}
     ${types.length ? `<div class="biz-sec"><b>Business types</b>${chips(types)}</div>` : ""}
     <div class="biz-sec"><b>Screening</b><div class="biz-chips">${exPill}${ofPill}</div>${ex.fapiisUrl ? `<a class="small" href="${esc(ex.fapiisUrl)}" target="_blank" rel="noopener noreferrer">FAPIIS record on SAM.gov</a>` : ""}</div>
     <div class="biz-sec"><b>Federal award history</b>${usLine}${awards}</div>
-    <p class="muted small">Checked ${esc(new Date(d.checkedAt).toLocaleString())}. Screening is a name and UEI search, not a determination of responsibility.</p>`;
+    <p class="muted small">Checked ${esc(new Date(d.checkedAt).toLocaleString())}${reg.ok && reg.fetchedAt ? "; registration data fetched " + esc(new Date(reg.fetchedAt).toLocaleString()) + (reg.cached ? " (saved copy, refreshed every 6 hours)" : "") : ""}. Screening is a name and UEI search, not a determination of responsibility. <button type="button" class="linkbtn" data-biz-refresh>Refresh</button></p>`;
 }
-async function bizLoad(uei, save) {
+async function bizLoad(uei, save, fresh) {
   const out = $("#bizOut"), msg = $("#bizMsg");
   msg.textContent = "";
   if (uei && !UEI_OK.test(uei)) { msg.textContent = "A UEI is 12 letters and numbers."; return; }
   if (uei || out.innerHTML === "") out.innerHTML = loading("Looking up your registration…");
   try {
-    const r = await fetch("/api/entity" + (uei ? "?uei=" + encodeURIComponent(uei) + (save ? "&save=1" : "") : ""), { headers: { authorization: "Bearer " + TOKEN } });
+    const q = new URLSearchParams(); if (uei) { q.set("uei", uei); if (save) q.set("save", "1"); } if (fresh) q.set("cache", "off");
+    const qs = q.toString();
+    const r = await fetch("/api/entity" + (qs ? "?" + qs : ""), { headers: { authorization: "Bearer " + TOKEN } });
     if (r.status === 401) { showLogin("That token was not accepted."); return; }
     const d = await r.json().catch(() => ({}));
     if (!r.ok) { out.innerHTML = ""; msg.textContent = d.error || "Lookup failed (" + r.status + ")."; return; }
     if (!d.uei) { out.innerHTML = ""; $("#bizClear").hidden = true; return; }
     $("#bizForm").elements.uei.value = d.uei; $("#bizClear").hidden = false;
     out.innerHTML = bizRender(d);
+    $("[data-biz-refresh]", out)?.addEventListener("click", () => bizLoad("", false, true));
   } catch (e) { out.innerHTML = errBox(e); }
 }
 let bizReady = false;
