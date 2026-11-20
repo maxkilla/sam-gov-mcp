@@ -42,3 +42,4 @@ database_id = "c3db7e33-eed7-418d-86d1-0441e6435ee4"
 #   wrangler secret put MCP_AUTH_TOKEN     # required: bearer token for your agents
 #   wrangler secret put SAM_GOV_API_KEY    # optional: only for the 5 key-gated tools
 #   (FRED_API_KEY, CENSUS_API_KEY, BEA_API_KEY, DOL_API_KEY work the same way)
+# Optional plain variable: ENTITY_FALLBACK=off stops the My business tab using the keyless public-extract mirror.

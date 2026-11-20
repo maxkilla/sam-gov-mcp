@@ -265,6 +265,8 @@ interface Env {
   GOV_RELAY_URL?: string;
   RELAY_TOKEN?: string;
   DB?: D1Database;
+  /** Set to "off" to stop the My business tab using the keyless public-extract mirror when SAM.gov data is unavailable. */
+  ENTITY_FALLBACK?: string;
   /** Optional: where the daily digest is sent (Slack, Discord, n8n or ntfy URL). Set as a Secret. */
   ALERT_WEBHOOK_URL?: string;
   /** api.data.gov key; GSA Auctions needs it. Falls back to the shared DEMO_KEY. */
@@ -607,7 +609,11 @@ export default {
       const sam = new SamGovClient({ apiKey: env.SAM_GOV_API_KEY?.trim() || undefined });
       const cache = cacheFor(env, ctx, { off: url.searchParams.get("cache") === "off" });
       const run = async (name: string, args: Record<string, unknown>) => (await runEnvelope(sam, name, args, cache)).envelope;
-      const profile = await loadEntity(uei, env.SAM_GOV_API_KEY?.trim() || undefined, run);
+      const profile = await loadEntity(
+        uei,
+        { samKey: env.SAM_GOV_API_KEY?.trim() || undefined, kv: env.CACHE, fresh: url.searchParams.get("cache") === "off", fallback: env.ENTITY_FALLBACK?.trim().toLowerCase() !== "off" },
+        run,
+      );
       if (given && url.searchParams.get("save") === "1" && env.CACHE) await env.CACHE.put("settings:uei", uei);
       return json(profile);
     }
